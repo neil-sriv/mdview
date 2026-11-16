@@ -1,4 +1,4 @@
-/* A picture opened over the page (lightbox.js). The dialog fills the viewport, so a click off the picture lands on it and closes it. */
+/* A picture or diagram opened over the page (lightbox.js). The dialog fills the viewport, so a click off the picture lands on it and closes it. */
 .lightbox {
   width: 100vw;
   height: 100vh;
@@ -9,6 +9,8 @@
   border: 0;
   background: transparent;
   cursor: zoom-out;
+  /* Leave pinch and pan to the browser, so a diagram can be zoomed on a phone. */
+  touch-action: pan-x pan-y pinch-zoom;
 }
 .lightbox[open] { display: grid; place-items: center; }
 .lightbox::backdrop { background: rgba(0, 0, 0, 0.78); }
@@ -20,6 +22,24 @@
   box-shadow: var(--shadow-lg);
   background: var(--bg);
   cursor: default;
+}
+/* --aspect is the diagram's viewBox width / height, so it fills the dialog on one axis and keeps its shape. */
+.lightbox-diagram {
+  width: min(calc(100vw - 96px), calc((100vh - 96px) * var(--aspect, 1)));
+  height: min(calc(100vh - 96px), calc((100vw - 96px) / var(--aspect, 1)));
+  touch-action: pan-x pan-y pinch-zoom;
+}
+.lightbox-diagram svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  background: var(--bg);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  cursor: default;
+  /* The whole fitted box stays open on a tap, including the gaps between nodes. */
+  pointer-events: all;
 }
 .lightbox-close {
   position: fixed;
