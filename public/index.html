@@ -5,6 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>mdview</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+  <meta name="theme-color" content="#2f6feb">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="mdview">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/hljs/github.css" id="hljs-light">
   <link rel="stylesheet" href="/static/hljs/github-dark.css" id="hljs-dark">
@@ -50,6 +57,10 @@
       </button>
     </div>
   </header>
+  <div id="offline" class="offline-banner" hidden role="status">
+    <p id="offline-status"></p>
+    <p class="offline-note">Comment posting is off until you're back.</p>
+  </div>
   <div class="layout">
     <aside class="sidebar" id="sidebar">
       <div class="filter-wrap">

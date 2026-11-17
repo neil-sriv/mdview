@@ -27,8 +27,14 @@ export async function startViewer({ files, initial, port = 47400 }) {
     store,
     file: (rel) => path.join(root, rel),
     write: (rel, content) => fs.writeFile(path.join(root, rel), content),
-    async close() {
+    /** Closes the port, as if the computer serving mdview were unreachable. */
+    async disconnect() {
+      if (!server.listening) return;
       server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    },
+    async close() {
+      if (server.listening) server.closeAllConnections();
       await new Promise((resolve) => server.close(resolve));
       store.close();
       await fs.rm(dir, { recursive: true, force: true });

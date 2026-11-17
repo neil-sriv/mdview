@@ -23,6 +23,10 @@ export function updateCommentButton() {
 }
 
 export function openComposer() {
+  if (document.documentElement.dataset.offline === "1") {
+    toast("You're offline. Comment posting is off until you're back.");
+    return;
+  }
   const comments = state.comments;
   const selection = getSelection();
   if (!comments.enabled || !selection.rangeCount || selection.isCollapsed) return;
