@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import net from "node:net";
 import { chromeMissing, sharedChrome } from "../helpers/browser.mjs";
 import { startViewer } from "../helpers/viewer.mjs";
 import { select } from "../helpers/viewer-page.mjs";
@@ -89,4 +90,120 @@ test("a saved doc opens offline, with the time it was cached and comments disabl
     const img = document.querySelector("#doc img");
     return img && img.complete && img.naturalWidth > 0;
   }, { what: "the cached image" });
+});
+
+const FILES = { "plan.md": PLAN, "other.md": OTHER, "dot.png": PNG };
+
+/** A cached vault with the worker in control. `other.md` has been saved, and not opened as its own page. */
+async function openCached(t, port) {
+  const viewer = await startViewer({ files: FILES, initial: "plan.md", port });
+  t.after(() => viewer.close());
+  const page = await (await chrome()).open(viewer.url);
+  t.after(() => page.close());
+  t.after(() => assert.deepEqual(page.errors, [], "the page threw"));
+  await page.waitFor(() => document.querySelector("#doc h1")?.textContent.includes("Plan"), { what: "the doc to render" });
+  await page.waitFor(() => window.__mdviewSync?.ok === true, { timeout: 20_000, what: "the vault to cache" });
+  await page.goto(viewer.url);
+  await page.waitFor(() => document.querySelector("#doc h1")?.textContent.includes("Plan") && navigator.serviceWorker.controller, {
+    timeout: 20_000,
+    what: "the worker to control the page",
+  });
+  return { viewer, page };
+}
+
+/** Listens on mdview's port after it has stopped. `respond` writes the socket, or leaves it open. */
+function occupy(port, respond) {
+  const sockets = new Set();
+  let answered = 0;
+  const server = net.createServer((socket) => {
+    sockets.add(socket);
+    socket.on("error", () => {});
+    socket.on("close", () => sockets.delete(socket));
+    socket.on("data", () => {
+      if (!respond) return;
+      answered += 1;
+      respond(socket);
+    });
+  });
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", () => {
+      resolve({
+        get answered() {
+          return answered;
+        },
+        close() {
+          for (const socket of sockets) socket.destroy();
+          server.close();
+        },
+      });
+    });
+  });
+}
+
+function gateway(port, status) {
+  const reason = status === 504 ? "Gateway Timeout" : "Bad Gateway";
+  const body = reason;
+  return occupy(port, (socket) => {
+    socket.end(
+      `HTTP/1.1 ${status} ${reason}\r\nContent-Type: text/plain\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`,
+    );
+  });
+}
+
+/** Opens `rel` while mdview is gone and reports how long the cached page took. */
+async function openSaved(page, url) {
+  const started = Date.now();
+  const arrived = await Promise.race([
+    page.goto(url).then(() => "loaded"),
+    new Promise((resolve) => setTimeout(() => resolve("slow"), 15_000)),
+  ]);
+  assert.equal(arrived, "loaded", "the navigation never left the hung connect");
+  await page.waitFor(
+    () => document.querySelector("#doc h1")?.textContent.includes("Other") && document.querySelector("#offline").hidden === false,
+    { timeout: 12_000, what: "the cached doc and its banner" },
+  );
+  const text = await page.eval(() => document.querySelector("#doc").innerText);
+  assert.match(text, /Hello offline/);
+  assert.doesNotMatch(text, /CHANGED/);
+  assert.match(await page.eval(() => document.querySelector("#offline-status").textContent), /^Offline — saved at \d/);
+  return Date.now() - started;
+}
+
+test("a connect that never answers serves a cached doc, including one whose view URL was never opened", { skip: chromeMissing, timeout: 45_000 }, async (t) => {
+  const { viewer, page } = await openCached(t, 47630);
+  const otherUrl = new URL("/view/other.md", viewer.url).href;
+  assert.equal(await page.eval(async (url) => (await caches.match(url)) != null, otherUrl), false);
+  assert.equal(await page.eval(async () => (await caches.match("/api/doc?path=other.md"))?.ok ?? false), true);
+  await viewer.write("other.md", "# Other\n\nCHANGED TOO\n");
+
+  await viewer.disconnect();
+  const blocker = await occupy(Number(new URL(viewer.url).port));
+  t.after(() => blocker.close());
+
+  const elapsed = await openSaved(page, otherUrl);
+  assert.ok(elapsed < 15_000, `fell back in ${elapsed}ms`);
+
+  const syncStarted = Date.now();
+  await page.eval(() => {
+    window.__mdviewSync = null;
+    navigator.serviceWorker.controller.postMessage({ type: "sync" });
+  });
+  await page.waitFor(() => window.__mdviewSync?.ok === false, { timeout: 8_000, what: "sync to give up while the connect hangs" });
+  assert.ok(Date.now() - syncStarted < 8_000, `sync took ${Date.now() - syncStarted}ms`);
+  assert.match(await page.eval(() => document.querySelector("#doc").innerText), /Hello offline/);
+});
+
+test("a 502 from the proxy serves the cached doc instead of the gateway error", { skip: chromeMissing, timeout: 45_000 }, async (t) => {
+  const { viewer, page } = await openCached(t, 47631);
+  const otherUrl = new URL("/view/other.md", viewer.url).href;
+  await viewer.write("other.md", "# Other\n\nCHANGED TOO\n");
+  await viewer.disconnect();
+  const proxy = await gateway(Number(new URL(viewer.url).port), 502);
+  t.after(() => proxy.close());
+
+  const elapsed = await openSaved(page, otherUrl);
+  assert.ok(elapsed < 10_000, `fell back in ${elapsed}ms`);
+  assert.ok(proxy.answered >= 1, "the proxy never returned a 502");
+  assert.equal(await page.eval(() => document.body.innerText.includes("Bad Gateway")), false);
 });

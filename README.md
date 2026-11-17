@@ -34,7 +34,7 @@ The sidebar and links reach only files under the root. A link that climbs above 
 
 Open mdview over HTTPS (a tailnet address works) and add it to the home screen. The page carries a web app manifest and a service worker, so it installs as its own app. On the computer, `http://127.0.0.1` is a secure context, and the worker registers there too.
 
-While the app can reach the computer it saves the viewer and every Markdown file under the root, and refetches a file only when its contents change. Images those files reference are saved too, up to 2 MiB each (2,097,152 bytes); larger images stay online-only. Offline, or when the computer is unreachable, saved notes and the file list still open, and a banner shows when that copy was saved (`Offline — saved at 10:42`). Comment posting is off until the computer is back, and nothing is queued. Live reload waits quietly and reconnects on its own.
+While the app can reach the computer it saves the viewer and every Markdown file under the root, and refetches a file only when its contents change. Images those files reference are saved too, up to 2 MiB each (2,097,152 bytes); larger images stay online-only. Saved notes and the file list still open when the computer is unreachable, when a connection never answers, or when the proxy returns a gateway error. A silent connect is given up after three seconds. A banner shows when that copy was saved (`Offline — saved at 10:42`). Comment posting is off until the computer is back, and nothing is queued. Live reload waits quietly and reconnects on its own.
 
 Paths are relative to the page, so this works through a proxy that rewrites the host. After installing this version, remove the old home-screen icon and add it again so the phone picks up the manifest.
 

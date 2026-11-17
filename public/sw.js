@@ -7,10 +7,15 @@
  * refetches only the files that changed, plus their rendered /api/doc page and
  * same-origin images at or under the catalog's byte cap.
  *
- * Online, a request goes to the network and refreshes the cache. Offline, the
- * cached copy is served and the page is told when it was saved. Event streams
- * are left alone so live reload fails and retries on its own, and /sw.js is
- * never cached so the browser can update this script.
+ * Online, a request goes to the network and refreshes the cache. A connect that
+ * never answers (the phone can still resolve the Mac over Tailscale) is given
+ * up after NETWORK_MS, and a 5xx from the proxy is treated the same way: the
+ * cached copy is served and the page is told when it was saved. One timed-out
+ * attempt is left running so a late response can still refresh the cache; the
+ * one before it is aborted, and the sync crawl aborts too, so a dead connect
+ * cannot hold the phone's whole connection pool. Event streams are left alone
+ * so live reload fails and retries on its own, and /sw.js is never cached so
+ * the browser can update this script.
  */
 
 const SHELL = "mdview-shell";
@@ -18,6 +23,7 @@ const DOCS = "mdview-docs";
 const FALLBACK_IMAGE_BYTES = 2 * 1024 * 1024;
 const SHELL_LIMIT = 400;
 const FETCH_LIMIT = 6;
+const NETWORK_MS = 3000;
 
 const READ_APIS = new Set(["/api/doc", "/api/docs", "/api/tree", "/api/info", "/api/inbox"]);
 
@@ -59,44 +65,151 @@ function signals(url, nav) {
   return nav || url.pathname === "/api/doc" || url.pathname === "/api/info" || url.pathname === "/api/tree";
 }
 
+/** A proxy in front of a stopped mdview answers 502/503/504. Any 5xx is that case. */
+function isGateway(status) {
+  return status >= 500 && status <= 599;
+}
+
+/**
+ * Races `request` against `ms`. On timeout the fetch is still running: its
+ * controller aborts it only when a newer attempt takes the one late-refresh slot.
+ */
+function fetchRace(request, ms) {
+  const controller = new AbortController();
+  const network = fetch(request, { signal: controller.signal });
+  let timer;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve("timeout"), ms);
+  });
+  return Promise.race([
+    network.then((response) => ({ response })).catch((error) => ({ error })),
+    timeout,
+  ]).then((outcome) => {
+    if (outcome !== "timeout") clearTimeout(timer);
+    return outcome === "timeout" ? { timeout: true, controller, network } : outcome;
+  });
+}
+
+/** Aborts at `ms`, so the sync crawl cannot sit on a dead Tailscale connect. */
+function fetchWithin(resource, ms = NETWORK_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  return fetch(resource, { signal: controller.signal, cache: "no-store" }).finally(() => clearTimeout(timer));
+}
+
+// The single timed-out page fetch still allowed to finish and refresh the cache.
+let lateRefresh = null;
+
+function adoptLate(controller, network, onOk) {
+  lateRefresh?.abort();
+  lateRefresh = controller;
+  return network
+    .then(async (late) => {
+      if (lateRefresh === controller) lateRefresh = null;
+      await onOk(late);
+    })
+    .catch(() => {
+      if (lateRefresh === controller) lateRefresh = null;
+    });
+}
+
+function cancelLate() {
+  lateRefresh?.abort();
+  lateRefresh = null;
+}
+
+async function refreshCached(request, cache, kind) {
+  try {
+    const fresh = await fetchWithin(request);
+    if (!fresh.ok || isGateway(fresh.status)) return;
+    if (kind.raw) await cacheImage(cache, request, fresh);
+    else await putStamped(cache, request, fresh);
+  } catch {
+    // The saved copy stays. The attempt aborts at NETWORK_MS, so it does not sit on the socket.
+  }
+}
+
 async function networkFirst(event, url, kind) {
   const cache = await caches.open(kind.shell ? SHELL : DOCS);
-  try {
-    const fresh = await fetch(event.request);
-    if (fresh.ok) {
-      const saved = fresh.clone();
-      const shell = kind.nav ? fresh.clone() : null;
-      // Hand the page its response now; write the cache behind it. waitUntil can throw
-      // once the fetch handler has returned, and that must not turn into an offline miss.
+  // Shell files and images are already on the phone after the first save. Hand them over
+  // at once and revalidate behind the page; a navigation or a read API waits up to NETWORK_MS
+  // so an awake Mac still wins, then falls back.
+  if (!kind.nav && !kind.api) {
+    const cached = await cache.match(event.request.url);
+    if (cached) {
+      const pending = refreshCached(event.request, cache, kind);
       try {
-        event.waitUntil((async () => {
-          if (kind.raw) await cacheImage(cache, event.request, saved);
-          else await putStamped(cache, event.request, saved);
-          if (shell) await putStamped(cache, "/view/", shell);
-        })());
+        event.waitUntil(pending);
       } catch {
-        // The next sync writes anything this request did not.
+        // The page already has the saved copy.
       }
-      if (signals(url, kind.nav)) void tell(event.clientId, { type: "online" });
+      return cached;
     }
+  }
+  const outcome = await fetchRace(event.request, NETWORK_MS);
+
+  if (outcome.response?.ok) {
+    cancelLate();
+    const fresh = outcome.response;
+    const saved = fresh.clone();
+    const shell = kind.nav ? fresh.clone() : null;
+    // Hand the page its response now; write the cache behind it. waitUntil can throw
+    // once the fetch handler has returned, and that must not turn into an offline miss.
+    try {
+      event.waitUntil((async () => {
+        if (kind.raw) await cacheImage(cache, event.request, saved);
+        else await putStamped(cache, event.request, saved);
+        if (shell) await putStamped(cache, "/view/", shell);
+      })());
+    } catch {
+      // The next sync writes anything this request did not.
+    }
+    if (signals(url, kind.nav)) void tell(event.clientId, { type: "online" });
     return fresh;
-  } catch {
-    // Match by URL. A navigation request's mode would miss the GET entry we stored.
-    let cached = await cache.match(event.request.url);
-    if (!cached && kind.nav) cached = await cache.match("/view/");
-    if (cached && signals(url, kind.nav)) {
-      await tell(event.clientId, {
-        type: "offline",
-        cachedAt: cached.headers.get("X-Mdview-Cached-At"),
-        doc: url.pathname === "/api/doc",
-      });
+  }
+
+  // A real 404 or 403 is the server talking. A 5xx, a hang, or a dropped connect is not.
+  if (outcome.response && !isGateway(outcome.response.status)) return outcome.response;
+  outcome.response?.body?.cancel?.();
+
+  if (outcome.timeout) {
+    const pending = adoptLate(outcome.controller, outcome.network, async (late) => {
+      if (!late.ok || isGateway(late.status)) return;
+      if (kind.raw) {
+        await cacheImage(cache, event.request, late);
+        return;
+      }
+      const shell = kind.nav ? late.clone() : null;
+      await putStamped(cache, event.request, late);
+      if (shell) await putStamped(cache, "/view/", shell);
+    });
+    try {
+      event.waitUntil(pending);
+    } catch {
+      // The refresh still runs; losing the lifetime extension only drops a late write.
     }
-    if (cached) return cached;
-    return new Response("Offline, and this page has not been saved.", {
-      status: 503,
-      headers: { "Content-Type": "text/plain; charset=utf-8" },
+  }
+  return serveCached(event, url, kind, cache);
+}
+
+async function serveCached(event, url, kind, cache) {
+  // Match by URL. A navigation request's mode would miss the GET entry we stored.
+  // A /view/<doc> URL opened cold has no entry of its own; the shell at /view/ does,
+  // and the page then reads the doc from the cached /api/doc response.
+  let cached = await cache.match(event.request.url);
+  if (!cached && kind.nav) cached = await cache.match("/view/");
+  if (cached && signals(url, kind.nav)) {
+    await tell(event.clientId, {
+      type: "offline",
+      cachedAt: cached.headers.get("X-Mdview-Cached-At"),
+      doc: url.pathname === "/api/doc",
     });
   }
+  if (cached) return cached;
+  return new Response("Offline, and this page has not been saved.", {
+    status: 503,
+    headers: { "Content-Type": "text/plain; charset=utf-8" },
+  });
 }
 
 /** Caches an image response when it is an image within the cap. False means the cache rejected it. */
@@ -157,7 +270,9 @@ function syncAll() {
 
 async function doSync() {
   try {
-    await cacheShell();
+    const shellOk = await cacheShell();
+    // A dead connect stops here. Continuing would open a fetch per file and pin the page's pool.
+    if (!shellOk) throw new Error("offline");
     const cached = await cacheDocs();
     await tellAll({ type: "synced", ok: true, docs: cached });
   } catch (err) {
@@ -193,9 +308,9 @@ async function cacheShell() {
     seen.add(url);
     let res;
     try {
-      res = await fetch(url, { cache: "no-store" });
+      res = await fetchWithin(url);
     } catch {
-      continue;
+      return false;
     }
     if (!res.ok) continue;
     const type = res.headers.get("content-type") ?? "";
@@ -204,6 +319,7 @@ async function cacheShell() {
     await putStamped(cache, url, res);
     if (text) for (const next of linksIn(text, url)) if (!seen.has(next)) queue.push(next);
   }
+  return true;
 }
 
 async function mapPool(items, fn) {
@@ -225,7 +341,7 @@ async function readJson(cache, url) {
 }
 
 async function cacheDocs() {
-  const res = await fetch("/api/docs", { cache: "no-store" });
+  const res = await fetchWithin("/api/docs");
   if (!res.ok) throw new Error(`catalog ${res.status}`);
   const catalog = await res.json();
   if (Number.isFinite(catalog.imageBytes)) imageCap = catalog.imageBytes;
@@ -236,14 +352,17 @@ async function cacheDocs() {
   await putStamped(cache, "/api/docs", new Response(JSON.stringify(catalog), { headers: { "Content-Type": "application/json" } }));
 
   const current = new Set(catalog.docs.map((doc) => doc.path));
+  let offline = false;
   await mapPool(catalog.docs, async (doc) => {
+    if (offline) return;
     const url = `/api/doc?path=${encodeURIComponent(doc.path)}`;
     if (prevDocs.get(doc.path) === doc.etag && (await cache.match(url))) return;
     try {
-      const docRes = await fetch(url, { cache: "no-store" });
+      const docRes = await fetchWithin(url);
       if (docRes.ok) await putStamped(cache, url, docRes);
     } catch {
-      // Keep the previous copy. The next poll tries again.
+      // Keep the previous copy, and stop opening more sockets into a dead host.
+      offline = true;
     }
   });
   for (const [path] of prevDocs) {
@@ -251,19 +370,24 @@ async function cacheDocs() {
   }
 
   // The folder index the home screen opens, which the page asks for as an empty path.
-  try {
-    const indexRes = await fetch("/api/doc?path=", { cache: "no-store" });
-    if (indexRes.ok) await putStamped(cache, "/api/doc?path=", indexRes);
-  } catch {
-    // The named docs above still open.
+  if (!offline) {
+    try {
+      const indexRes = await fetchWithin("/api/doc?path=");
+      if (indexRes.ok) await putStamped(cache, "/api/doc?path=", indexRes);
+    } catch {
+      offline = true;
+    }
   }
 
-  for (const url of ["/api/tree", "/api/info", "/api/inbox"]) {
-    try {
-      const apiRes = await fetch(url, { cache: "no-store" });
-      if (apiRes.ok) await putStamped(cache, url, apiRes);
-    } catch {
-      // Optional. /api/inbox 404s until that page exists, and a dropped tree keeps the last copy.
+  if (!offline) {
+    for (const url of ["/api/tree", "/api/info", "/api/inbox"]) {
+      try {
+        const apiRes = await fetchWithin(url);
+        if (apiRes.ok) await putStamped(cache, url, apiRes);
+      } catch {
+        offline = true;
+        break;
+      }
     }
   }
 
@@ -272,14 +396,14 @@ async function cacheDocs() {
   await mapPool(catalog.images ?? [], async (img) => {
     currentImages.add(img.url);
     if (quota || img.size > imageCap) return;
-    if (prevImages.get(img.url) === img.etag && (await cache.match(img.url))) return;
+    if (offline || (prevImages.get(img.url) === img.etag && (await cache.match(img.url)))) return;
     try {
-      const imgRes = await fetch(img.url, { cache: "no-store" });
+      const imgRes = await fetchWithin(img.url);
       if (!imgRes.ok) return;
       const saved = await cacheImage(cache, img.url, imgRes);
       if (saved === false) quota = true;
     } catch {
-      // Leave the previous image in place.
+      offline = true;
     }
   });
   for (const [url] of prevImages) if (!currentImages.has(url)) await cache.delete(url);
