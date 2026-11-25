@@ -415,3 +415,15 @@ function trackedFetch(server, url, init) {
   server.calls.push({ method: init?.method ?? "GET", pathname: parsed.pathname, admin: parsed.pathname.startsWith("/internal/") });
   return fetch(url, init);
 }
+
+test("a spec moved to archive/ after it was commented on rekeys to its archive key", async () => {
+  const vault = await fs.mkdtemp(path.join(root, "archived-"));
+  const specs = path.join(vault, "projects", "genesis", "specs");
+  await fs.mkdir(path.join(specs, "archive"), { recursive: true });
+  await fs.writeFile(path.join(specs, "archive", "m1.md"), V1);
+  await fs.writeFile(path.join(specs, "live.md"), V1);
+
+  assert.equal(rekeyDocument(path.join(specs, "m1.md"), vault), "genesis/archive/m1.md");
+  assert.equal(rekeyDocument(path.join(specs, "live.md"), vault), "genesis/live.md");
+  assert.equal(rekeyDocument(path.join(specs, "gone.md"), vault), "genesis/gone.md");
+});
