@@ -447,6 +447,31 @@ describe("specs", () => {
   });
 });
 
+describe("spec delete", () => {
+  it("deletes only with the current If-Match and keeps the revision", async () => {
+    const token = await sign(await baseClaims({ common_name: "agent-token" }));
+    const opened = await call("GET", `/api/specs/${KEY}`, { token, author: "specs" });
+    const stale = await call("POST", `/api/specs/${KEY}/delete`, {
+      token,
+      author: "specs",
+      body: { requestId: "del-stale" },
+      headers: { "if-match": `"${"0".repeat(64)}"` },
+    });
+    const done = await call("POST", `/api/specs/${KEY}/delete`, {
+      token,
+      author: "specs",
+      body: { requestId: "del-ok" },
+      headers: { "if-match": opened.headers.get("etag") },
+    });
+    const after = await call("GET", `/api/specs/${KEY}`, { token, author: "specs" });
+
+    expect(stale.status).toBe(412);
+    expect(done.status).toBe(200);
+    expect(after.status).toBe(404);
+    expect(await env.BUCKET.head(`specs/${KEY}`)).toBeNull();
+  });
+});
+
 describe("cron", () => {
   it("retries a due webhook from the minute cron", async () => {
     webhook.script = [500];

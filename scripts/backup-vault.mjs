@@ -14,7 +14,7 @@ import { pullVault } from "../lib/backup.mjs";
 
 try {
   const result = await pullVault({ env: process.env });
-  console.log(`backup: ${result.written.length} written, ${result.overwritten.length} overwritten, ${result.unchanged.length} unchanged`);
+  console.log(`backup: ${result.written.length} written, ${result.overwritten.length} overwritten, ${result.removed.length} removed, ${result.unchanged.length} unchanged`);
 } catch (err) {
   console.error(`backup: ${err.message}`);
   process.exit(1);

@@ -217,6 +217,20 @@ export class R2DocSource {
     return { status: 200, key: to, sha256: current.sha256, fromKey: from, toKey: to };
   }
 
+  /** Removes the current spec. Its `revs/` stay, for recovery. The spec lock is the guard. */
+  async deleteSync({ key, ifMatch }) {
+    const current = await this.readSpec(key);
+    if (!current) return specResult(404, "not_found", `No spec ${key}.`);
+    if (ifMatch == null) return specResult(428, "precondition", "If-Match is required.");
+    if (ifMatch !== current.sha256) {
+      return { ...specResult(412, "stale", "The spec changed since you read it."), current: { sha256: current.sha256, content: current.content } };
+    }
+    await this.bucket.delete(specObject(key));
+    this.#text.delete(key);
+    this.#meta.delete(key);
+    return { status: 200, key, sha256: current.sha256 };
+  }
+
   /** A revision text threads already cite. Does not replace the current spec. */
   async putRevision({ key, content, sha256: expected, by, at, sourceRev }) {
     if (!validSpecKey(key)) return specResult(400, "bad_key", "That is not a spec key.");

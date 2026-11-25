@@ -76,7 +76,7 @@ MDVIEW_ACCESS_CLIENT_SECRET=
 MDVIEW_BACKUP_KEY=
 ```
 
-The timer runs one pass every 5 minutes. The script only sends GET. It asks for specs changed since the previous pass, and also reads the full list so a local edit is overwritten even when R2 has not changed. It writes a file only when the bytes differ, logs the overwrite to `inbox/learnings.md`, and never writes back.
+The timer runs one pass every 5 minutes. The script only sends GET. It asks for specs changed since the previous pass, and also reads the full list so a local edit is overwritten even when R2 has not changed. It writes a file only when the bytes differ, logs the overwrite to `inbox/learnings.md`, and never writes back. A spec it mirrored that is gone from the Worker (moved or deleted) is removed from the vault and logged, unless the vault copy was edited. The script needs `--import ./lib/register-peanut.mjs`, like every mdview entry point that loads peanut. Where there is no systemd, as on the Grok Bot box, run the same command every 5 minutes from a loop.
 
 ```ini
 # /etc/systemd/system/mdview-backup.service
@@ -87,7 +87,8 @@ Description=Pull mdview specs into the vault
 Type=oneshot
 User=box
 EnvironmentFile=/home/box/.secrets/mdview-backup-token.env
-ExecStart=/usr/bin/node /home/box/mdview/scripts/backup-vault.mjs
+WorkingDirectory=/home/box/mdview
+ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning --import ./lib/register-peanut.mjs scripts/backup-vault.mjs
 
 # /etc/systemd/system/mdview-backup.timer
 [Unit]

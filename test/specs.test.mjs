@@ -257,3 +257,32 @@ test("mdview specs get remembers the ETag and put sends it", async () => {
     server.close();
   }
 });
+
+test("delete needs the current If-Match, removes the spec, and keeps its revisions", async () => {
+  const file = path.join(root, "agent-brain", "gone.md");
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, "Remove me.\n");
+  const opened = await call("GET", "/api/specs/agent-brain/gone.md");
+  const missing = await call("POST", "/api/specs/agent-brain/gone.md/delete", { body: { requestId: "gone-428" } });
+  const stale = await call("POST", "/api/specs/agent-brain/gone.md/delete", {
+    body: { requestId: "gone-412" },
+    headers: { "if-match": `"${"0".repeat(64)}"` },
+  });
+  const backup = await call("POST", "/api/specs/agent-brain/gone.md/delete", {
+    body: { requestId: "gone-backup" },
+    identity: BACKUP,
+    headers: { "if-match": opened.etag },
+  });
+  const deleted = await call("POST", "/api/specs/agent-brain/gone.md/delete", {
+    body: { requestId: "gone-ok" },
+    headers: { "if-match": opened.etag },
+  });
+  const after = await call("GET", "/api/specs/agent-brain/gone.md");
+
+  assert.equal(missing.status, 428);
+  assert.equal(stale.status, 412);
+  assert.equal(backup.status, 403);
+  assert.equal(deleted.status, 200, deleted.text);
+  assert.equal(after.status, 404);
+  await assert.rejects(fs.stat(file));
+});
