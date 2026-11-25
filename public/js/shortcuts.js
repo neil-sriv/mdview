@@ -12,6 +12,7 @@ export function watchShortcuts() {
     const typing = event.target.matches("input, textarea, select, [contenteditable]");
     // Notion's ⌘⇧M, or Google Docs' ⌘⌥M where the browser keeps ⌘⇧M for itself.
     if ((event.metaKey || event.ctrlKey) && event.code === "KeyM" && (event.shiftKey || event.altKey)) {
+      if (!$("#spec-editor").hidden) return;
       event.preventDefault();
       openComposer();
     } else if (event.key === "Escape" && !typing) {

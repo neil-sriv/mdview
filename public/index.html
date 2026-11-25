@@ -39,6 +39,8 @@
       <button class="btn btn-primary" type="button" id="batch-send">Send</button>
     </span>
     <div class="actions">
+      <button class="btn spec-text-btn" id="edit-spec" type="button" title="Edit this spec" hidden>Edit</button>
+      <button class="btn spec-text-btn" id="new-spec" type="button" title="New spec" aria-label="New spec">New</button>
       <button class="icon-btn comments-btn" id="comments-btn" title="Comments" aria-label="Comments" hidden>
         <svg class="icon" aria-hidden="true"><use href="#i-comment"/></svg>
         <span class="count" id="comments-count"></span>
@@ -60,6 +62,37 @@
   <div id="offline" class="offline-banner" hidden role="status">
     <p id="offline-status"></p>
     <p class="offline-note">Comment posting is off until you're back.</p>
+  </div>
+  <div id="spec-editor" class="spec-editor" role="dialog" aria-modal="true" aria-label="Edit spec" hidden>
+    <div class="spec-editor-top">
+      <label class="spec-key-field" id="spec-key-field">
+        <span>Key</span>
+        <input id="spec-key" type="text" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="project/name.md" aria-label="Spec key">
+      </label>
+      <p id="spec-conflict-note" class="spec-conflict-note" hidden></p>
+      <p id="spec-status" class="spec-status" role="status"></p>
+      <p class="spec-kept">Draft stays on this phone until the save succeeds.</p>
+    </div>
+    <div class="spec-panes" id="spec-panes">
+      <section class="spec-pane" id="spec-current-pane" hidden>
+        <h2>Current text</h2>
+        <pre id="spec-current"></pre>
+      </section>
+      <section class="spec-pane" id="spec-draft-pane">
+        <h2 id="spec-draft-heading">Markdown</h2>
+        <textarea id="spec-text" spellcheck="true" aria-label="Markdown"></textarea>
+      </section>
+    </div>
+    <div class="spec-previous" id="spec-previous" hidden>
+      <p>Your earlier draft is still on this phone.</p>
+      <button type="button" class="btn" id="spec-copy-previous">Copy earlier draft</button>
+    </div>
+    <div class="spec-editor-actions">
+      <button type="button" class="btn" id="spec-cancel">Cancel</button>
+      <button type="button" class="btn" id="spec-copy-draft" hidden>Copy your draft</button>
+      <button type="button" class="btn" id="spec-reload" hidden>Reload the latest</button>
+      <button type="button" class="btn btn-primary" id="spec-save">Save</button>
+    </div>
   </div>
   <div class="layout">
     <aside class="sidebar" id="sidebar">

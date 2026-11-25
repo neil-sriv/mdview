@@ -8,6 +8,7 @@
  * them. Keeping it one-way is what lets each part be read, and tested, alone.
  */
 import { composerOpen } from "./comments/composer.js";
+import { editorOpen, initSpecEditor, restoreSpecEditor, syncEditButton } from "./spec-editor.js";
 import { forgetRanges, initComments, jumpToThread, loadComments, onLayoutChange, resetComments } from "./comments/index.js";
 import { $, copyText, getJson, toast } from "./dom.js";
 import { docHooks, loadDoc, renderMeta, showError, watchToggles } from "./doc.js";
@@ -33,7 +34,8 @@ docHooks.commentsChanged = () => {
   loadComments();
   refreshTree();
 };
-docHooks.holdReload = composerOpen;
+docHooks.holdReload = () => composerOpen() || editorOpen();
+docHooks.shown = syncEditButton;
 navHooks.inbox = showInbox;
 navHooks.thread = jumpToThread;
 sidebarHooks.resized = () => {
@@ -77,10 +79,16 @@ async function init() {
     return;
   }
   initComments();
+  initSpecEditor();
   renderTree();
-  if (location.pathname === "/inbox") return showInbox();
+  if (location.pathname === "/inbox") {
+    showInbox();
+    await restoreSpecEditor();
+    return;
+  }
   state.comments.activateAfterLoad = threadFromSearch(location.search);
   await loadDoc(relFromPathname(location.pathname), { version: versionFromSearch(location.search) });
+  await restoreSpecEditor();
 }
 
 init();

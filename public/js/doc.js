@@ -17,10 +17,10 @@ const LIVE_ON = "Live reload: on. The page updates when the file changes.";
  * runs before another doc (or an error) replaces this one, `replaced` right
  * after the article's HTML changes, `loaded` once the doc is on screen, and
  * `commentsChanged` when the server reports a write to the comment store.
- * While `holdReload` returns true, a change to the file waits for
- * releaseReload instead of reloading the page.
+ * `shown` runs once the header matches the page. While `holdReload` returns
+ * true, a change to the file waits for releaseReload instead of reloading.
  */
-export const docHooks = { leaving() {}, replaced() {}, loaded() {}, commentsChanged() {}, holdReload: () => false };
+export const docHooks = { leaving() {}, replaced() {}, loaded() {}, commentsChanged() {}, holdReload: () => false, shown() {} };
 
 let reloadWaiting = false;
 
@@ -86,6 +86,7 @@ export function showError(rel, err) {
   $("#toc").innerHTML = "";
   $("#meta").textContent = "";
   root.classList.add("no-toc");
+  docHooks.shown();
 }
 
 /**
@@ -109,6 +110,7 @@ export function showPage({ title, html }) {
   crumbs.setAttribute("aria-label", title);
   document.title = `${title} · mdview`;
   renderTree();
+  docHooks.shown();
 }
 
 export function scrollToHash(hash, behavior = "smooth") {
@@ -222,6 +224,7 @@ export async function loadDoc(rel, { keepScroll = false, hash = location.hash, v
   updateScroll();
   docHooks.loaded();
   drawDiagrams(article);
+  docHooks.shown();
 }
 
 function setReloadWaiting(waiting) {
