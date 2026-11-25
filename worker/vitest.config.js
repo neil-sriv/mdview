@@ -8,6 +8,8 @@ export default defineConfig({
       // Test fixtures, not the production secrets. Those stay out of the repo.
       miniflare: {
         bindings: {
+          AUTH_MODE: "access",
+          HUMAN_EMAILS: "neil@neilsriv.tech",
           AGENT_TOKEN_IDS: "agent-token",
           BACKUP_TOKEN_ID: "backup-token",
           ADMIN_TOKEN_ID: "admin-token",

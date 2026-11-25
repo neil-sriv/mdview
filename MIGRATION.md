@@ -4,6 +4,18 @@ Run this from a checkout of mdview, with the Mac store still at `~/.mdview/peanu
 
 `MDVIEW_ACCESS_CLIENT_ID` and `MDVIEW_ACCESS_CLIENT_SECRET` are the agent token, except where a step says to point them at the admin or backup token. `MDVIEW_ADMIN_ACCESS_CLIENT_ID` and `MDVIEW_ADMIN_ACCESS_CLIENT_SECRET` are the admin token. When those are unset, the admin calls use the access pair.
 
+## Open mode (no Access yet)
+
+Until Neil's IdP is ready, the Worker runs with `AUTH_MODE=open` (set in `worker/wrangler.jsonc`) and nothing sits in front of it. A request with no `Authorization` header is the first `HUMAN_EMAILS` entry. Bearer keys, set with `wrangler secret put`, pick the other roles:
+
+| Worker secret | Client variable | Role |
+| --- | --- | --- |
+| `AGENT_KEY` | `MDVIEW_AGENT_KEY`, plus `MDVIEW_AUTHOR` sent as `X-Mdview-Agent` | agent |
+| `BACKUP_KEY` | `MDVIEW_BACKUP_KEY` | backup, spec reads only |
+| `ADMIN_KEY` | `MDVIEW_ADMIN_KEY` | admin, `/internal/*` only |
+
+`/internal/*` without the admin key is 401 or 403. A wrong key is 401. In open mode, set the key variables wherever this runbook says to set a service-token pair: the agent key for `specs` and `comments`, the admin key for `store import`, `store observe`, `store verify` and seed's revision upload, and the backup key for the backup loop. The keys live in `~/.mdview/mdview-*.env` on the Mac and `/home/box/.secrets/mdview-*.env` on the box, mode 600. Set `AUTH_MODE` to `access` to go back to the Access check.
+
 The import body can be up to 64 MiB. An export larger than that has to be split by hand; the store this was written for fits.
 
 ## 1. Stop the Mac jobs and copy the database
@@ -60,6 +72,8 @@ MDVIEW_URL=https://specs.neilsriv.tech
 MDVIEW_VAULT=/home/box/vaults/agent-brain
 MDVIEW_ACCESS_CLIENT_ID=
 MDVIEW_ACCESS_CLIENT_SECRET=
+# open mode: the backup key instead of the token pair
+MDVIEW_BACKUP_KEY=
 ```
 
 The timer runs one pass every 5 minutes. The script only sends GET. It asks for specs changed since the previous pass, and also reads the full list so a local edit is overwritten even when R2 has not changed. It writes a file only when the bytes differ, logs the overwrite to `inbox/learnings.md`, and never writes back.
