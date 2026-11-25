@@ -8,7 +8,8 @@
  * Anything else verified is 403.
  *
  * No token at all: a browser (or curl -I) is redirected to Access; an API
- * client gets 401. A token that does not verify is 401, redirect or not.
+ * client gets 401. `/internal/` is an API. A token that does not verify is
+ * 401, redirect or not.
  */
 
 const CERT_TTL_MS = 10 * 60 * 1000;
@@ -71,7 +72,7 @@ function mapIdentity(claims, request, env) {
 
 function unsigned(request, env) {
   const url = new URL(request.url);
-  const api = url.pathname.startsWith("/api/");
+  const api = url.pathname.startsWith("/api/") || url.pathname.startsWith("/internal/");
   const browser = (request.headers.get("accept") ?? "").includes("text/html");
   // curl -I is HEAD. Access answers that with the login redirect; an API
   // client that simply omitted the token gets 401.
@@ -88,7 +89,8 @@ function redirectToAccess(request, env) {
 }
 
 function reject(request, status, message) {
-  const api = new URL(request.url).pathname.startsWith("/api/");
+  const pathname = new URL(request.url).pathname;
+  const api = pathname.startsWith("/api/") || pathname.startsWith("/internal/");
   if (!api) return new Response(message, { status, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
   return Response.json({ error: message }, { status, headers: { "Cache-Control": "no-store" } });
 }

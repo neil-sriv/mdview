@@ -10,10 +10,12 @@ import { toPosix } from "../lib/files.mjs";
 const USAGE = `Usage: mdview [file-or-folder] [options]
        mdview comments <verb> [options]
        mdview specs <command> [options]
+       mdview store <command> [options]
 
 Opens a Markdown file or folder in a local reader. "mdview comments --help"
 lists the verbs agents use to read and answer comments. "mdview specs --help"
-lists and edits specs on the Worker.
+lists and edits specs on the Worker. "mdview store --help" exports the Mac
+comment store and loads it into the Worker.
 
 Options:
   -r, --root <dir>   Serve this folder (default: the folder you opened, or the file's folder).
@@ -93,6 +95,9 @@ if (argv[0] === "comments") {
 } else if (argv[0] === "specs") {
   const { runSpecs } = await import("../lib/specs-cli.mjs");
   process.exitCode = await runSpecs(argv.slice(1));
+} else if (argv[0] === "store") {
+  const { runStore } = await import("../lib/store-cli.mjs");
+  process.exitCode = await runStore(argv.slice(1));
 } else {
   await view(argv);
 }
