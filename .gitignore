@@ -1,3 +1,8 @@
 node_modules/
 .DS_Store
 .adam/
+
+# Built for the Worker asset bundle by worker/prepare-assets.mjs.
+public/style.css
+public/vendor-hljs/
+public/vendor/
