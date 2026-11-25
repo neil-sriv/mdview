@@ -10,6 +10,12 @@
  * No token at all: a browser (or curl -I) is redirected to Access; an API
  * client gets 401. `/internal/` is an API. A token that does not verify is
  * 401, redirect or not.
+ *
+ * AUTH_MODE=open (no Access in front, until Neil's IdP is ready): a request
+ * with no Authorization header is the first HUMAN_EMAILS entry, except on
+ * `/internal/`, which is 401. `Authorization: Bearer <key>` picks the role:
+ * ADMIN_KEY is admin, BACKUP_KEY is backup, AGENT_KEY is an agent named by
+ * X-Mdview-Agent (or X-Mdview-Author). Any other bearer is 401.
  */
 
 const CERT_TTL_MS = 10 * 60 * 1000;
@@ -23,6 +29,7 @@ export function resetAccessCache() {
 }
 
 export async function identify(request, env) {
+  if (authMode(env) === "open") return identifyOpen(request, env);
   const token = request.headers.get("Cf-Access-Jwt-Assertion");
   if (!token) return { response: unsigned(request, env) };
   try {
@@ -33,6 +40,42 @@ export async function identify(request, env) {
   } catch {
     return { response: reject(request, 401, "Sign in.") };
   }
+}
+
+export function authMode(env) {
+  const mode = String(env.AUTH_MODE ?? "").trim().toLowerCase();
+  if (!mode || mode === "access") return "access";
+  if (mode === "open") return "open";
+  throw new Error(`AUTH_MODE must be access or open, not ${mode}`);
+}
+
+async function identifyOpen(request, env) {
+  const pathname = new URL(request.url).pathname;
+  const auth = request.headers.get("Authorization");
+  if (!auth) {
+    if (pathname.startsWith("/internal/")) return { response: reject(request, 401, "That API needs a key.") };
+    const author = split(env.HUMAN_EMAILS)[0];
+    if (!author) return { response: reject(request, 403, "This identity can't do that.") };
+    return { identity: { kind: "human", author, session: null } };
+  }
+  const match = /^Bearer\s+(\S+)\s*$/i.exec(auth);
+  const key = match ? match[1] : "";
+  if (key && (await sameSecret(key, env.ADMIN_KEY))) return { identity: { kind: "admin", author: "admin", session: null } };
+  if (key && (await sameSecret(key, env.BACKUP_KEY))) return { identity: { kind: "backup", author: "backup", session: null } };
+  if (key && (await sameSecret(key, env.AGENT_KEY))) {
+    const author = request.headers.get("X-Mdview-Agent") ?? request.headers.get("X-Mdview-Author") ?? "";
+    return { identity: { kind: "agent", author, session: null } };
+  }
+  return { response: reject(request, 401, "Bad key.") };
+}
+
+/** Compares SHA-256 digests so the check takes the same time for any length. */
+async function sameSecret(given, expected) {
+  const want = String(expected ?? "");
+  if (!want) return false;
+  const encode = (value) => crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  const [a, b] = await Promise.all([encode(given), encode(want)]);
+  return crypto.subtle.timingSafeEqual(a, b);
 }
 
 async function verifyAccessJwt(token, env) {

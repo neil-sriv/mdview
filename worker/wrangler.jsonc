@@ -9,6 +9,7 @@
   //   AGENT_TOKEN_IDS    comma-separated Access service-token common_names
   //   BACKUP_TOKEN_ID    the backup loop's service token common_name (read-only)
   //   ADMIN_TOKEN_ID     the one-time comment-import service token common_name
+  //   AGENT_KEY, BACKUP_KEY, ADMIN_KEY   bearer keys, used only when AUTH_MODE is "open"
   "$schema": "../node_modules/wrangler/config-schema.json",
   "name": "mdview",
   "main": "index.js",
@@ -31,9 +32,13 @@
   "triggers": { "crons": ["* * * * *", "17 3 * * *"] },
   "vars": {
     "PUBLIC_HOST": "specs.neilsriv.tech",
+    // "open" until Neil's IdP is ready: no Access, every unkeyed request is
+    // HUMAN_EMAILS[0], and keys pick agent, backup and admin. "access" (the
+    // default when unset) checks the Access JWT. Tests run with "access".
+    "AUTH_MODE": "open",
     // Placeholder until the Access team name is confirmed.
     "TEAM_DOMAIN": "https://neilsriv.cloudflareaccess.com",
     "POLICY_AUD": "replace-with-access-policy-aud",
-    "HUMAN_EMAILS": "neil@neilsriv.tech"
+    "HUMAN_EMAILS": "neil.srivastava1@gmail.com,neil@neilsriv.tech"
   }
 }

@@ -7,6 +7,7 @@
  *   MDVIEW_VAULT                /home/box/vaults/agent-brain
  *   MDVIEW_ACCESS_CLIENT_ID     backup service token
  *   MDVIEW_ACCESS_CLIENT_SECRET
+ *   MDVIEW_BACKUP_KEY           the backup key, when the Worker runs AUTH_MODE=open
  *   MDVIEW_BACKUP_STATE         optional cursor file (default: $MDVIEW_HOME/backup-state.json)
  */
 import { pullVault } from "../lib/backup.mjs";
