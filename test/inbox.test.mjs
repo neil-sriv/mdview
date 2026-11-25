@@ -111,3 +111,23 @@ test("a viewer without a comment store reports nothing waiting", async (t) => {
   assert.deepEqual((await (await fetch(new URL("/api/tree", bare.url))).json()).waiting, {});
   assert.deepEqual(await (await fetch(new URL("/api/inbox", bare.url))).json(), { docs: [] });
 });
+
+test("a root made of symlinks counts and lists the docs behind them, by the paths the file list shows", async (t) => {
+  // Like ~/cs/specs-view: the root holds only links to folders elsewhere.
+  const linked = path.join(dir, "linked");
+  await fs.mkdir(linked);
+  await fs.symlink(path.join(dir, "root", "notes"), path.join(linked, "project"));
+  await fs.symlink(path.join(dir, "root", "a.md"), path.join(linked, "top.md"));
+  const viaLinks = await startServer({ root: linked, initial: "top.md", port: 47126, store });
+  t.after(() => {
+    viaLinks.server.closeAllConnections();
+    viaLinks.server.close();
+  });
+  const get = async (p) => (await fetch(new URL(p, viaLinks.url))).json();
+  assert.deepEqual((await get("/api/tree")).waiting, { "project/b.md": 1, "top.md": 1 });
+  const { docs } = await get("/api/inbox");
+  assert.deepEqual(
+    docs.map((d) => [d.path, d.threads.map((th) => th.id)]).sort(),
+    [["project/b.md", [ids.suggested]], ["top.md", [ids.answered]]],
+  );
+});
