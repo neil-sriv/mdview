@@ -427,3 +427,36 @@ test("a spec moved to archive/ after it was commented on rekeys to its archive k
   assert.equal(rekeyDocument(path.join(specs, "live.md"), vault), "genesis/live.md");
   assert.equal(rekeyDocument(path.join(specs, "gone.md"), vault), "genesis/gone.md");
 });
+
+test("the backup loop removes a mirrored spec the Worker moved, and keeps an edited one", async () => {
+  const vault = await fs.mkdtemp(path.join(root, "prune-"));
+  const env = { MDVIEW_URL: "http://worker.test/", MDVIEW_VAULT: vault, MDVIEW_BACKUP_STATE: path.join(vault, "state.json") };
+  const text = { "agent-brain/a.md": "A\n", "agent-brain/b.md": "B\n", "agent-brain/c.md": "C\n" };
+  let live = Object.keys(text);
+  const row = (key) => ({ key, sha256: sha256Bytes(Buffer.from(text[key])), size: text[key].length, updatedAt: "2026-11-25T00:00:00.000Z", updatedBy: "seed" });
+  async function fetchImpl(url) {
+    const { pathname } = new URL(url);
+    if (pathname === "/api/specs") return json({ specs: live.map(row) });
+    const key = decodeURIComponent(pathname.slice("/api/specs/".length));
+    return new Response(text[key], { status: 200 });
+  }
+  const file = (key) => path.join(vault, "projects", ...key.replace("/", "/specs/").split("/"));
+  const quiet = () => {};
+  await pullVault({ env, fetchImpl, log: quiet });
+  await fs.writeFile(file("agent-brain/c.md"), "edited\n");
+  live = ["agent-brain/a.md"];
+  text["specs/archive/b.md"] = "B\n";
+  live.push("specs/archive/b.md");
+
+  const pass = await pullVault({ env, fetchImpl, log: quiet });
+
+  assert.deepEqual(pass.removed, ["agent-brain/b.md"]);
+  await assert.rejects(fs.stat(file("agent-brain/b.md")));
+  assert.equal(await fs.readFile(file("specs/archive/b.md"), "utf8"), "B\n");
+  assert.equal(await fs.readFile(file("agent-brain/c.md"), "utf8"), "edited\n");
+  assert.match(await fs.readFile(path.join(vault, "inbox", "learnings.md"), "utf8"), /removed projects\/agent-brain\/specs\/b\.md/);
+  live = [];
+  const empty = await pullVault({ env, fetchImpl, log: quiet });
+  assert.deepEqual(empty.removed, []);
+  assert.equal(await fs.readFile(file("agent-brain/a.md"), "utf8"), "A\n");
+});
