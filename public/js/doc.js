@@ -260,7 +260,8 @@ function watch(rel) {
   };
   source.onerror = () => {
     live.classList.remove("on");
-    live.title = "Live reload: reconnecting";
+    // The stream retries on its own (the server sends `retry`). Offline, say so instead of "reconnecting" forever.
+    live.title = document.documentElement.dataset.offline === "1" ? "Live reload: off while offline" : "Live reload: reconnecting";
   };
   source.addEventListener("change", () => {
     if (docHooks.holdReload()) setReloadWaiting(true);

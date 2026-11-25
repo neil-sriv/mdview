@@ -5,6 +5,12 @@ export const root = document.documentElement;
 
 export async function getJson(url) {
   const res = await fetch(url, { cache: "no-store" });
+  // A cached doc carries the time it was saved. A live response does not, which clears the offline banner.
+  const cachedAt = res.headers.get("X-Mdview-Cached-At");
+  if (url.startsWith("/api/doc")) {
+    if (cachedAt) window.mdviewOffline?.(cachedAt);
+    else if (res.ok) window.mdviewOnline?.();
+  }
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || `${res.status} ${res.statusText}`);
   return body;
@@ -12,6 +18,9 @@ export async function getJson(url) {
 
 /** POSTs `body` as JSON. A refusal throws an Error carrying the server's message and HTTP `status`. */
 export async function postJson(url, body) {
+  if (document.documentElement.dataset.offline === "1") {
+    throw new Error("You're offline. Comment posting is off until you're back.");
+  }
   const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw Object.assign(new Error(data.error || `${res.status} ${res.statusText}`), { status: res.status });

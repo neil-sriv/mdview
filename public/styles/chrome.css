@@ -86,6 +86,42 @@ button.crumbs:focus-visible .icon { opacity: 1; }
 .live.on { background: var(--success); }
 .live.held { background: var(--warning); }
 .live.flash { animation: pulse 900ms ease-out; }
+
+.offline-banner {
+  position: sticky;
+  top: var(--topbar);
+  z-index: 19;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  align-items: baseline;
+  padding: 7px 14px;
+  background: var(--text);
+  color: var(--bg);
+  font-size: var(--text-md);
+}
+.offline-banner[hidden] { display: none; }
+.offline-banner p { margin: 0; }
+.offline-note { opacity: 0.8; }
+html[data-offline="1"] .sidebar,
+html[data-offline="1"] .toc-pane {
+  top: calc(var(--topbar) + var(--offline-h, 0px));
+  height: calc(100vh - var(--topbar) - var(--offline-h, 0px));
+}
+html[data-offline="1"] #comment-btn,
+html[data-offline="1"] #composer,
+html[data-offline="1"] #batch,
+html[data-offline="1"] .thread [data-submit],
+html[data-offline="1"] .thread textarea.reply,
+html[data-offline="1"] .thread [data-action="resolved"],
+html[data-offline="1"] .thread [data-action="open"],
+html[data-offline="1"] .thread [data-action="delete-thread"],
+html[data-offline="1"] .thread [data-action="delete-message"] {
+  display: none !important;
+}
+@media print {
+  .offline-banner { display: none !important; }
+}
 @keyframes pulse {
   0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 70%, transparent); }
   100% { box-shadow: 0 0 0 10px transparent; }

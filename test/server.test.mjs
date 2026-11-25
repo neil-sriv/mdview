@@ -5,6 +5,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { sha256 } from "peanut/anchors/markdown-block";
+import { IMAGE_BYTES } from "../lib/catalog.mjs";
 import { startServer } from "../lib/server.mjs";
 import { openStore } from "../lib/store.mjs";
 
@@ -129,6 +130,8 @@ test("the viewer page may run scripts only from /static/js/", async () => {
   const policy = res.headers["content-security-policy"];
 
   assert.match(policy, new RegExp(`script-src http://127\\.0\\.0\\.1:${port}/static/js/(;|$)`));
+  assert.match(policy, /worker-src 'self'/);
+  assert.match(policy, /manifest-src 'self'/);
   assert.match(policy, /object-src 'none'/);
   assert.match(policy, /frame-ancestors 'none'/);
   assert.doesNotMatch(policy, /unsafe-eval|script-src[^;]*'unsafe-inline'/);
@@ -334,6 +337,93 @@ test("a write from another process streams a comments event", async () => {
   });
 
   assert.match(stream, /event: comments/);
+});
+
+test("the manifest, icons and service worker are served for an installed app", async () => {
+  const manifest = await get("/manifest.webmanifest");
+  const page = await get("/view/notes/plan.md");
+  const worker = await get("/sw.js");
+  const icon = await get("/static/icon-192.png");
+
+  assert.equal(manifest.status, 200);
+  assert.match(manifest.headers["content-type"], /^application\/manifest\+json/);
+  const parsed = JSON.parse(manifest.body);
+  assert.equal(parsed.name, "mdview");
+  assert.equal(parsed.display, "standalone");
+  assert.equal(parsed.start_url, "/");
+  assert.equal(parsed.scope, "/");
+  assert.deepEqual(
+    parsed.icons.map((entry) => entry.sizes),
+    ["192x192", "512x512", "512x512"],
+  );
+  assert.match(page.body, /rel="manifest" href="\/manifest\.webmanifest"/);
+  assert.match(page.body, /rel="apple-touch-icon" href="\/static\/apple-touch-icon\.png"/);
+  assert.equal(worker.status, 200);
+  assert.match(worker.headers["content-type"], /^text\/javascript/);
+  assert.match(worker.body, /mdview-docs/);
+  assert.equal(icon.status, 200);
+  assert.match(icon.headers["content-type"], /^image\/png/);
+});
+
+test("the doc catalog lists hashes and same-origin images under the size cap", async () => {
+  const note = path.join(dir, "notes", "offline.md");
+  const shot = path.join(dir, "notes", "shot.png");
+  await fs.writeFile(shot, "png");
+  await fs.writeFile(path.join(dir, "notes", "wiki.png"), "wiki");
+  await fs.writeFile(path.join(dir, "notes", "my shot.png"), "spaced");
+  await fs.writeFile(path.join(dir, "notes", "html.png"), "html");
+  await fs.writeFile(path.join(dir, "notes", "fenced.png"), "fenced");
+  await fs.writeFile(path.join(dir, "notes", "big.png"), Buffer.alloc(IMAGE_BYTES + 1, 7));
+  await fs.writeFile(
+    note,
+    [
+      "# Offline",
+      "",
+      "![shot](shot.png)",
+      "![big](big.png)",
+      "![spaced](<my shot.png>)",
+      "![[wiki.png]]",
+      '<img src="html.png" alt="">',
+      "![web](https://example.com/a.png)",
+      "![out](../../secret.png)",
+      "",
+      "```",
+      "![nope](fenced.png)",
+      "```",
+      "",
+    ].join("\n"),
+  );
+
+  const catalog = async () => JSON.parse((await get("/api/docs")).body);
+  const first = await catalog();
+  const doc = (body, rel) => body.docs.find((entry) => entry.path === rel);
+  const src = await fs.readFile(note, "utf8");
+  assert.equal(doc(first, "notes/offline.md").sha, sha256(src));
+  assert.equal(doc(first, "notes/offline.md").etag, sha256(src));
+  assert.equal(typeof doc(first, "notes/offline.md").mtimeMs, "number");
+  assert.equal(doc(first, "notes/offline.md").size, Buffer.byteLength(src));
+  assert.equal(first.imageBytes, IMAGE_BYTES);
+  assert.equal(first.imagesOmitted, 1);
+  assert.deepEqual(
+    first.images.map((img) => img.path),
+    ["notes/html.png", "notes/my shot.png", "notes/shot.png", "notes/wiki.png"],
+  );
+  assert.equal(first.images.find((img) => img.path === "notes/my shot.png").url, "/raw/notes/my%20shot.png");
+  assert.equal(JSON.stringify(first).includes(dir), false);
+
+  const again = await catalog();
+  assert.equal(doc(again, "notes/offline.md").etag, doc(first, "notes/offline.md").etag);
+  const touched = new Date(Date.now() + 10_000);
+  await fs.utimes(note, touched, touched);
+  const retouched = await catalog();
+  assert.equal(doc(retouched, "notes/offline.md").etag, doc(first, "notes/offline.md").etag);
+  assert.equal(doc(retouched, "README.md").etag, doc(first, "README.md").etag);
+
+  await fs.writeFile(note, `${src}\nAnother line.\n`);
+  const edited = await catalog();
+  assert.notEqual(doc(edited, "notes/offline.md").etag, doc(first, "notes/offline.md").etag);
+  assert.equal(doc(edited, "README.md").etag, doc(first, "README.md").etag);
+  assert.equal(doc(edited, "notes/offline.md").etag, sha256(await fs.readFile(note, "utf8")));
 });
 
 test("the stylesheet is served as one bundle of the files under public/styles", async () => {
