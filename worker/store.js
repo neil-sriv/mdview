@@ -13,8 +13,8 @@
 import { DurableObject } from "cloudflare:workers";
 import { AnchorError, doSqlite, PeanutStore as Comments, Registry, StoreError } from "peanut";
 import { mdviewApp } from "../lib/peanut-app.mjs";
-import { AsyncStore, StoreError as ViewError } from "../lib/store.mjs";
-import { backoffMs, OUTBOX_SQL, withOutbox } from "./outbox.js";
+import { AsyncStore, renameStoredDoc, StoreError as ViewError } from "../lib/store.mjs";
+import { OUTBOX_SQL, withOutbox } from "./outbox.js";
 
 const registry = new Registry().register(mdviewApp);
 
@@ -32,7 +32,7 @@ export function remoteStore(env) {
     }
     return value;
   });
-  return new AsyncStore({
+  const store = new AsyncStore({
     onWrite: () => () => {},
     changeToken: () => call(stub.changeToken()),
     observe: (type, key, input) => call(stub.observe(type, key, input ?? null)),
@@ -54,6 +54,39 @@ export function remoteStore(env) {
     documentOf: (threadId) => call(stub.documentOf(threadId)),
     documents: (filter) => call(stub.documents(filter ?? null)),
   });
+  // Spec writes await R2, so they cannot run inside the DO's transaction.
+  // The request id is recorded after the bucket accepts the write.
+  store.once = (requestId, fn) => specOnce(stub, requestId, fn);
+  store.renameDocument = (from, to) => call(stub.renameDocument(from, to));
+  store.waitingOnHumanCountsIn = async (keys) => {
+    const want = new Set(keys);
+    const rows = await call(stub.humanCounts());
+    return new Map(rows.filter(([key]) => want.has(key)));
+  };
+  store.waitingOnHumanIn = async (keys) => {
+    const found = [];
+    for (const [doc] of await store.waitingOnHumanCountsIn(keys)) {
+      const result = await store.threadsAt(doc);
+      const threads = result?.threads.filter((thread) => thread.waitingOn === "human") ?? [];
+      if (threads.length) found.push({ ...result, threads });
+    }
+    return found;
+  };
+  return store;
+}
+
+async function specOnce(stub, requestId, fn) {
+  const prior = await stub.readRequest(requestId);
+  if (prior?.hit) return prior.value;
+  await stub.acquireSpecLock();
+  try {
+    const again = await stub.readRequest(requestId);
+    if (again?.hit) return again.value;
+    const value = await fn(null);
+    return await stub.rememberRequest(requestId, value);
+  } finally {
+    await stub.releaseSpecLock();
+  }
 }
 
 /** The nightly cron. `now` is injectable so a test can age rows out. */
@@ -76,6 +109,12 @@ function opts(value) {
   return strip(value) ?? {};
 }
 
+function storable(value) {
+  if (!value || typeof value !== "object") return value;
+  const { etag, content, current, ...rest } = value;
+  return rest;
+}
+
 function jsonSafe(value) {
   if (typeof value === "bigint") return Number(value);
   if (Array.isArray(value)) return value.map(jsonSafe);
@@ -90,6 +129,8 @@ function jsonSafe(value) {
 export class PeanutStore extends DurableObject {
   #db;
   #peanut;
+  #specLock = false;
+  #specWaiters = [];
 
   constructor(ctx, env) {
     super(ctx, env);
@@ -144,20 +185,69 @@ export class PeanutStore extends DurableObject {
     }));
   }
 
-  async markFailed(ids, nowIso) {
-    const now = new Date(nowIso);
-    return this.#call(() => this.#db.transaction(() => {
-      const updated = [];
-      for (const id of ids ?? []) {
-        const row = this.#db.get("SELECT attempts FROM mdview_outbox WHERE id = ? AND delivered_at IS NULL", Number(id));
-        if (!row) continue;
-        const attempts = Number(row.attempts) + 1;
-        const nextAt = new Date(now.getTime() + backoffMs(attempts)).toISOString();
-        this.#db.run("UPDATE mdview_outbox SET attempts = ?, next_at = ? WHERE id = ?", attempts, nextAt, Number(id));
-        updated.push({ id: Number(id), attempts, nextAt });
-      }
-      return updated;
-    }));
+  async markFailed(id, nextAt) {
+    return this.#call(() => {
+      const row = this.#db.get("SELECT attempts FROM mdview_outbox WHERE id = ? AND delivered_at IS NULL", Number(id));
+      if (!row) return null;
+      const attempts = Number(row.attempts) + 1;
+      this.#db.run("UPDATE mdview_outbox SET attempts = ?, next_at = ? WHERE id = ?", attempts, nextAt, Number(id));
+      return { id: Number(id), attempts, nextAt };
+    });
+  }
+
+  async renameDocument(from, to) {
+    return this.#call(() => this.#peanut.write((db) => renameStoredDoc(db, from, to)));
+  }
+
+  async humanCounts() {
+    return this.#call(() =>
+      this.#db
+        .all(
+          `SELECT d.key AS key, count(*) AS n FROM threads t
+           JOIN thread_facts f ON f.thread_id = t.id JOIN documents d ON d.id = t.document_id
+           WHERE f.waiting_on = 'human' AND d.type = 'mdview.doc'
+           GROUP BY d.key ORDER BY d.key`,
+        )
+        .map((row) => [row.key, Number(row.n)]),
+    );
+  }
+
+  async acquireSpecLock() {
+    if (!this.#specLock) {
+      this.#specLock = true;
+      return;
+    }
+    await new Promise((resolve) => this.#specWaiters.push(resolve));
+  }
+
+  async releaseSpecLock() {
+    const next = this.#specWaiters.shift();
+    if (next) next();
+    else this.#specLock = false;
+  }
+
+  async readRequest(id) {
+    return this.#call(() => {
+      const row = this.#db.get("SELECT result FROM mdview_requests WHERE id = ?", id);
+      if (!row) return { hit: false };
+      const parsed = JSON.parse(row.result);
+      return { hit: true, value: parsed.u ? undefined : parsed.v };
+    });
+  }
+
+  async rememberRequest(id, value) {
+    return this.#call(() => {
+      const stored = storable(value);
+      this.#db.run(
+        `INSERT INTO mdview_requests (id, result, created_at) VALUES (?, ?, ?) ON CONFLICT(id) DO NOTHING`,
+        id,
+        JSON.stringify({ v: stored }),
+        new Date().toISOString(),
+      );
+      const row = this.#db.get("SELECT result FROM mdview_requests WHERE id = ?", id);
+      const parsed = JSON.parse(row.result);
+      return parsed.u ? undefined : parsed.v;
+    });
   }
 
   async pruneRequests(nowIso) {

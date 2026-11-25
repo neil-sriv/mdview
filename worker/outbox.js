@@ -33,25 +33,45 @@ export function backoffMs(attempts) {
   return minutes * 60 * 1000;
 }
 
+/** The Mac notifier clips quote, the new human bodies, and recent bodies at these lengths. */
+export function clip(text, max) {
+  const value = String(text ?? "");
+  return value.length <= max ? value : value.slice(0, max);
+}
+
 /**
- * JSON posted to the Route spec comments routine.
- *
- * TODO(investigate:notify-payload): today's body is whatever
- * ~/.local/share/mdview-tailnet/comment-notify.mjs posts. That script is not
- * in this repo. The fields below are the likely shape (document key, thread
- * id, message id, author, body, quote) plus the two this spec adds on top
- * (deliveryId, link). Confirm the real shape before cutover.
+ * The JSON `comment-notify.mjs` posts, plus `deliveryId` (the message id) and
+ * `link` (`https://<PUBLIC_HOST>/view/<key>`). One row is one message, so
+ * `threads` has that one thread and `newFromNeil` has that one body.
+ * `heading` and `lines` are empty: peanut computes them on read, and they are
+ * not columns. `host` is `worker`.
  */
-export function notifyPayload({ key, threadId, messageId, author, body, quote, publicHost }) {
+export function notifyPayload({ key, threadId, messageId, body, quote, status, publicHost, at, recent }) {
+  const [project, ...rest] = String(key).split("/");
+  const file = rest.join("/");
+  const link = `https://${publicHost}/view/${key}`;
   return {
-    document: key,
-    threadId,
-    messageId,
-    author,
-    body,
-    quote,
+    source: "mdview",
+    event: "spec-comments",
+    host: "worker",
+    at,
     deliveryId: messageId,
-    link: `https://${publicHost}/view/${key}`,
+    link,
+    threads: [
+      {
+        project,
+        file,
+        vaultPath: `projects/${project}/specs/${file}`,
+        url: link,
+        threadId,
+        status: status ?? "open",
+        heading: "",
+        lines: "",
+        quote: clip(quote, 600),
+        newFromNeil: [clip(body, 1500)],
+        recent: recent ?? [],
+      },
+    ],
   };
 }
 
@@ -92,47 +112,62 @@ export function withOutbox(db, { publicHost, payload = notifyPayload } = {}) {
   return wrapped;
 }
 
-function enqueueOne(db, { threadId, author, body, publicHost, payload }) {
+function enqueueOne(db, { threadId, body, publicHost, payload }) {
   const messageId = Number(db.get("SELECT last_insert_rowid() AS id").id);
-  const thread = db.get(
-    `SELECT d.key AS key, t.quote AS quote
-     FROM threads t JOIN documents d ON d.id = t.document_id WHERE t.id = ?`,
-    Number(threadId),
-  );
+  const thread = threadContext(db, threadId);
   if (!thread) throw new Error(`mdview: sent message ${messageId} has no thread`);
-  insertRow(db, { messageId, threadId: Number(threadId), author, body, key: thread.key, quote: thread.quote ?? "", publicHost, payload });
+  insertRow(db, { messageId, threadId: Number(threadId), body, thread, publicHost, payload });
 }
 
 function enqueueSent(db, sentAt, publicHost, payload) {
   const rows = db.all(
-    `SELECT m.id AS id, m.thread_id AS threadId, m.author AS author, m.body AS body, d.key AS key, t.quote AS quote
+    `SELECT m.id AS id, m.thread_id AS threadId, m.body AS body
      FROM messages m
-     JOIN threads t ON t.id = m.thread_id
-     JOIN documents d ON d.id = t.document_id
      WHERE m.sent_at = ? AND m.author_kind = 'human'
        AND NOT EXISTS (SELECT 1 FROM mdview_outbox o WHERE o.message_id = m.id)`,
     sentAt,
   );
   for (const row of rows) {
-    insertRow(db, {
-      messageId: Number(row.id),
-      threadId: Number(row.threadId),
-      author: row.author,
-      body: row.body,
-      key: row.key,
-      quote: row.quote ?? "",
-      publicHost,
-      payload,
-    });
+    const thread = threadContext(db, row.threadId);
+    if (!thread) throw new Error(`mdview: sent message ${row.id} has no thread`);
+    insertRow(db, { messageId: Number(row.id), threadId: Number(row.threadId), body: row.body, thread, publicHost, payload });
   }
 }
 
-function insertRow(db, { messageId, threadId, author, body, key, quote, publicHost, payload }) {
+function threadContext(db, threadId) {
+  const thread = db.get(
+    `SELECT d.key AS key, t.quote AS quote, t.status AS status
+     FROM threads t JOIN documents d ON d.id = t.document_id WHERE t.id = ?`,
+    Number(threadId),
+  );
+  if (!thread) return null;
+  const recent = db
+    .all(
+      `SELECT author, author_kind AS kind, body FROM messages
+       WHERE thread_id = ? AND sent_at IS NOT NULL ORDER BY sent_at, id`,
+      Number(threadId),
+    )
+    .slice(-20)
+    .map((row) => ({ author: row.author, kind: row.kind, body: clip(row.body, 800) }));
+  return { ...thread, recent };
+}
+
+function insertRow(db, { messageId, threadId, body, thread, publicHost, payload }) {
   const at = new Date().toISOString();
   db.run(
     `INSERT INTO mdview_outbox (message_id, payload, created_at, next_at) VALUES (?, ?, ?, ?)`,
     messageId,
-    JSON.stringify(payload({ key, threadId, messageId, author, body, quote, publicHost })),
+    JSON.stringify(payload({
+      key: thread.key,
+      threadId,
+      messageId,
+      body,
+      quote: thread.quote ?? "",
+      status: thread.status,
+      publicHost,
+      at,
+      recent: thread.recent,
+    })),
     at,
     at,
   );

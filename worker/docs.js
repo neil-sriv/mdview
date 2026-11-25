@@ -1,29 +1,37 @@
 /**
- * Spec files in R2. Keys in the store are `<project>/<path>`. Objects are
- * `specs/<project>/<path>` with customMetadata { sha256, mtimeMs }.
- * `specs/_manifest.json` is the listing, written last by the sync side.
+ * Specs in R2, which is their source of truth.
+ *
+ * Current text: `specs/<project>/<path>`. Every save also writes
+ * `revs/<project>/<path>/<sha256>.md` before replacing the current object,
+ * including a save that then loses the conditional put, so both racers' text
+ * stays readable. The HTTP ETag is the sha256. R2's own etag is the MD5, and
+ * that is what `onlyIf` matches. A create uses `etagDoesNotMatch: "*"`, which
+ * Miniflare and R2 both reject when the key already exists.
  */
-const PREFIX = "specs/";
-const MANIFEST_KEY = "specs/_manifest.json";
-const INDEX_NAMES = ["README.md", "readme.md", "index.md", "00-overview.md"];
+import { sha256 } from "peanut/anchors/markdown-block";
+import { validSpecKey } from "../lib/docs.mjs";
+
+const SPEC = "specs/";
+const REV = "revs/";
 const MARKDOWN = /\.(md|markdown|mdx)$/i;
+const INDEX_NAMES = ["README.md", "readme.md", "index.md", "00-overview.md"];
+const TYPE = "text/markdown; charset=utf-8";
 
 export class R2DocSource {
-  #manifestPromise = null;
   #text = new Map();
   #meta = new Map();
 
   constructor(bucket) {
     this.bucket = bucket;
     this.root = "specs";
+    this.r2 = true;
   }
 
   async listMarkdown() {
-    const files = await this.#files();
-    return files.map((file) => file.path).filter((path) => MARKDOWN.test(path)).sort(byName);
+    const specs = await this.listSpecs();
+    return specs.map((spec) => spec.key).filter((key) => MARKDOWN.test(key)).sort(byName);
   }
 
-  /** The page "/" opens: an index file at the top, or the first Markdown file. */
   async initial() {
     const files = await this.listMarkdown();
     const top = files.filter((file) => !file.includes("/"));
@@ -35,7 +43,6 @@ export class R2DocSource {
     const path = clean(rel);
     if (path == null) return { error: "That path is outside the viewer's root.", status: 403 };
     if (!path) return this.#directory("");
-    if (path === "_manifest.json") return { error: "No such file: _manifest.json", status: 404 };
     const meta = await this.#head(path);
     if (meta) return this.#describe(path);
     return this.#directory(path);
@@ -44,18 +51,16 @@ export class R2DocSource {
   async scope(rel) {
     const path = clean(rel);
     if (path == null) return { error: "That path is outside the viewer's root.", status: 403 };
-    if (path && path !== "_manifest.json" && (await this.#head(path))) {
-      return { kind: "file", key: path, path };
-    }
+    if (path && (await this.#head(path))) return { kind: "file", key: path, path };
     const prefix = path ? `${path}/` : "";
-    const kids = (await this.#files()).filter((file) => file.path.startsWith(prefix));
+    const kids = (await this.listSpecs()).filter((spec) => spec.key.startsWith(prefix));
     if (kids.length || !path) return { kind: "folder", key: path, prefix, path };
     return { error: `No such file: ${rel || "."}`, status: 404 };
   }
 
   resolveRaw(rel) {
     const path = clean(rel);
-    if (path == null || !path || path === "_manifest.json") return null;
+    if (path == null || !path) return null;
     return path;
   }
 
@@ -67,10 +72,9 @@ export class R2DocSource {
     const path = clean(file);
     if (path == null || !path) return null;
     if (this.#text.has(path)) return this.#text.get(path);
-    const obj = await this.bucket.get(PREFIX + path);
-    const text = obj ? await obj.text() : null;
+    const found = await this.readSpec(path);
+    const text = found ? found.content : null;
     this.#text.set(path, text);
-    if (obj) this.#meta.set(path, metaOf(obj));
     return text;
   }
 
@@ -84,20 +88,163 @@ export class R2DocSource {
   async openRaw(file) {
     const path = typeof file === "string" ? clean(file) : null;
     if (path == null || !path) return null;
-    const obj = await this.bucket.get(PREFIX + path);
+    const obj = await this.bucket.get(specObject(path));
     if (!obj) return null;
-    return { body: obj.body, size: obj.size, ext: extOf(path) };
+    const dot = path.lastIndexOf(".");
+    return { body: obj.body, size: obj.size, ext: dot === -1 ? "" : path.slice(dot).toLowerCase() };
+  }
+
+  async listSpecs({ project, prefix, since } = {}) {
+    const objects = await listAll(this.bucket, SPEC);
+    const specs = [];
+    for (const object of objects) {
+      const key = object.key.slice(SPEC.length);
+      if (!validSpecKey(key)) continue;
+      if (project && !key.startsWith(`${project}/`)) continue;
+      if (prefix && !key.startsWith(prefix)) continue;
+      const updatedAt = object.customMetadata?.updatedAt || object.uploaded.toISOString();
+      if (since && updatedAt < since) continue;
+      specs.push({
+        key,
+        sha256: object.customMetadata?.sha256 || null,
+        size: object.size,
+        updatedAt,
+        updatedBy: object.customMetadata?.updatedBy || null,
+      });
+    }
+    specs.sort((a, b) => a.key.localeCompare(b.key, undefined, { numeric: true }));
+    return specs;
+  }
+
+  async readSpec(key) {
+    if (!validSpecKey(key)) return null;
+    const obj = await this.bucket.get(specObject(key));
+    if (!obj) return null;
+    const content = await obj.text();
+    const hash = sha256(content);
+    const updatedAt = obj.customMetadata?.updatedAt || obj.uploaded.toISOString();
+    this.#text.set(key, content);
+    this.#meta.set(key, { mtimeMs: Date.parse(updatedAt) });
+    return {
+      content,
+      sha256: hash,
+      size: obj.size,
+      updatedAt,
+      updatedBy: obj.customMetadata?.updatedBy || null,
+      storeKey: key,
+      file: key,
+      etag: obj.etag,
+    };
+  }
+
+  async revisionsOf(key) {
+    if (!(await this.#head(key))) return null;
+    const objects = await listAll(this.bucket, revPrefix(key));
+    const revisions = objects.map((object) => ({
+      sha256: object.customMetadata?.sha256 || shaFromRevKey(object.key),
+      updatedAt: object.customMetadata?.updatedAt || object.uploaded.toISOString(),
+      updatedBy: object.customMetadata?.updatedBy || null,
+    }));
+    revisions.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : a.sha256 < b.sha256 ? 1 : -1));
+    return revisions;
+  }
+
+  async revisionText(key, hash) {
+    if (!(await this.#head(key))) return null;
+    const obj = await this.bucket.get(revObject(key, hash));
+    if (!obj) return undefined;
+    return obj.text();
+  }
+
+  async createSync({ key, content, by, at }) {
+    if (await this.bucket.head(specObject(key))) return specResult(409, "exists", `A spec already exists at ${key}.`);
+    const hash = sha256(content);
+    await this.#keep(key, hash, content, at, by);
+    try {
+      await this.bucket.put(specObject(key), content, putOptions(hash, at, by, { etagDoesNotMatch: "*" }));
+    } catch (err) {
+      if (isPrecondition(err)) return specResult(409, "exists", `A spec already exists at ${key}.`);
+      throw err;
+    }
+    return { status: 201, sha256: hash, file: key, storeKey: key };
+  }
+
+  async putSync({ key, content, ifMatch, by, at }) {
+    const current = await this.readSpec(key);
+    if (!current) return specResult(404, "not_found", `No spec ${key}.`);
+    if (ifMatch == null) return specResult(428, "precondition", "If-Match is required.");
+    if (ifMatch !== current.sha256) {
+      return { ...specResult(412, "stale", "The spec changed since you read it."), current: { sha256: current.sha256, content: current.content } };
+    }
+    const next = sha256(content);
+    await this.#keep(key, current.sha256, current.content, current.updatedAt, current.updatedBy);
+    await this.#keep(key, next, content, at, by);
+    try {
+      await this.bucket.put(specObject(key), content, putOptions(next, at, by, { etagMatches: current.etag }));
+    } catch (err) {
+      if (!isPrecondition(err)) throw err;
+      const now = await this.readSpec(key);
+      return {
+        ...specResult(412, "stale", "The spec changed since you read it."),
+        current: { sha256: now?.sha256 ?? current.sha256, content: now?.content ?? current.content },
+      };
+    }
+    return { status: 200, sha256: next, file: key, storeKey: key };
+  }
+
+  async moveSync({ from, to, ifMatch }) {
+    const current = await this.readSpec(from);
+    if (!current) return specResult(404, "not_found", `No spec ${from}.`);
+    if (ifMatch == null) return specResult(428, "precondition", "If-Match is required.");
+    if (ifMatch !== current.sha256) {
+      return { ...specResult(412, "stale", "The spec changed since you read it."), current: { sha256: current.sha256, content: current.content } };
+    }
+    if (from === to) return { status: 200, key: to, sha256: current.sha256, fromKey: from, toKey: to };
+    if (await this.bucket.head(specObject(to))) return specResult(409, "exists", `A spec already exists at ${to}.`);
+    try {
+      await this.bucket.put(specObject(to), current.content, putOptions(current.sha256, current.updatedAt, current.updatedBy, { etagDoesNotMatch: "*" }));
+    } catch (err) {
+      if (isPrecondition(err)) return specResult(409, "exists", `A spec already exists at ${to}.`);
+      throw err;
+    }
+    await this.#copyRevs(from, to);
+    await this.bucket.delete(specObject(from));
+    await this.#deletePrefix(revPrefix(from));
+    this.#text.delete(from);
+    this.#meta.delete(from);
+    return { status: 200, key: to, sha256: current.sha256, fromKey: from, toKey: to };
+  }
+
+  async #keep(key, hash, content, at, by) {
+    await this.bucket.put(revObject(key, hash), content, putOptions(hash, at, by));
+  }
+
+  async #copyRevs(from, to) {
+    const objects = await listAll(this.bucket, revPrefix(from));
+    for (const object of objects) {
+      const hash = object.customMetadata?.sha256 || shaFromRevKey(object.key);
+      const body = await this.bucket.get(object.key);
+      if (!body) continue;
+      await this.bucket.put(revObject(to, hash), await body.arrayBuffer(), {
+        httpMetadata: { contentType: TYPE },
+        customMetadata: object.customMetadata,
+      });
+    }
+  }
+
+  async #deletePrefix(prefix) {
+    const objects = await listAll(this.bucket, prefix);
+    if (objects.length) await this.bucket.delete(objects.map((object) => object.key));
   }
 
   async #directory(path) {
     const prefix = path ? `${path}/` : "";
-    const kids = (await this.#files()).map((file) => file.path).filter((file) => file.startsWith(prefix));
-    if (!kids.length) return { error: `No such file: ${path || "."}`, status: 404 };
-    const here = kids.filter((file) => !file.slice(prefix.length).includes("/") && MARKDOWN.test(file));
-    const names = here.map((file) => file.slice(prefix.length));
+    const kids = (await this.listSpecs()).map((spec) => spec.key).filter((key) => key.startsWith(prefix) && MARKDOWN.test(key));
+    const here = kids.filter((key) => !key.slice(prefix.length).includes("/"));
+    const names = here.map((key) => key.slice(prefix.length));
     let index = INDEX_NAMES.find((name) => names.includes(name));
     if (!index) index = names.sort(byName)[0];
-    if (!index) return { error: `No Markdown files in ${path || "the root"}.`, status: 404 };
+    if (!index) return { error: `No Markdown files in ${path || "the root"}.`, status: kids.length ? 404 : 404 };
     return this.#describe(prefix + index);
   }
 
@@ -106,49 +253,82 @@ export class R2DocSource {
     return { kind: "markdown", rel: path, abs: path, file: path, key: path };
   }
 
-  async #files() {
-    if (!this.#manifestPromise) this.#manifestPromise = this.#readManifest();
-    return this.#manifestPromise;
-  }
-
-  async #readManifest() {
-    const obj = await this.bucket.get(MANIFEST_KEY);
-    if (!obj) return [];
-    let body;
-    try {
-      body = await obj.json();
-    } catch {
-      return [];
-    }
-    if (!body || body.version !== 1 || !Array.isArray(body.files)) return [];
-    return body.files.filter((file) => file && typeof file.path === "string" && clean(file.path) === file.path);
-  }
-
   async #head(path) {
     if (this.#meta.has(path)) return this.#meta.get(path);
-    const obj = await this.bucket.head(PREFIX + path);
-    const meta = obj ? metaOf(obj) : null;
+    const obj = await this.bucket.head(specObject(path));
+    if (!obj) {
+      this.#meta.set(path, null);
+      return null;
+    }
+    const meta = { mtimeMs: mtimeOf(obj) };
     this.#meta.set(path, meta);
     return meta;
   }
 }
 
-function metaOf(obj) {
-  const raw = obj.customMetadata?.mtimeMs;
-  const parsed = raw == null || raw === "" ? NaN : Number(raw);
-  return { mtimeMs: Number.isFinite(parsed) ? parsed : obj.uploaded.getTime() };
+function specObject(key) {
+  return SPEC + key;
 }
 
-function extOf(path) {
-  const dot = path.lastIndexOf(".");
-  return dot === -1 ? "" : path.slice(dot).toLowerCase();
+function revPrefix(key) {
+  return `${REV}${key}/`;
+}
+
+function revObject(key, hash) {
+  return `${revPrefix(key)}${hash}.md`;
+}
+
+function shaFromRevKey(objectKey) {
+  const name = objectKey.slice(objectKey.lastIndexOf("/") + 1);
+  return name.endsWith(".md") ? name.slice(0, -3) : name;
+}
+
+function putOptions(hash, at, by, onlyIf) {
+  const options = {
+    httpMetadata: { contentType: TYPE },
+    customMetadata: {
+      sha256: hash,
+      updatedAt: at || new Date().toISOString(),
+      updatedBy: by || "",
+    },
+  };
+  if (onlyIf) options.onlyIf = onlyIf;
+  return options;
+}
+
+function mtimeOf(obj) {
+  const raw = obj.customMetadata?.mtimeMs;
+  if (raw != null && raw !== "" && Number.isFinite(Number(raw))) return Number(raw);
+  const updatedAt = obj.customMetadata?.updatedAt;
+  if (updatedAt) return Date.parse(updatedAt);
+  return obj.uploaded.getTime();
+}
+
+function specResult(status, error, message) {
+  return { status, error, message };
+}
+
+function isPrecondition(err) {
+  const name = String(err?.name ?? "");
+  const message = String(err?.message ?? err);
+  return name.includes("Precondition") || /precondition/i.test(message);
+}
+
+async function listAll(bucket, prefix) {
+  const objects = [];
+  let cursor;
+  do {
+    const page = await bucket.list({ prefix, cursor, include: ["customMetadata"] });
+    objects.push(...page.objects);
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+  return objects;
 }
 
 function byName(a, b) {
   return a.localeCompare(b, undefined, { numeric: true });
 }
 
-/** A bucket key relative to specs/, or null when it would climb out. */
 function clean(rel) {
   if (typeof rel !== "string" || rel.includes("\0") || rel.includes("\\")) return null;
   const parts = [];

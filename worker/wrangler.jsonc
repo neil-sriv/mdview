@@ -7,7 +7,8 @@
   //   ROUTE_SPEC_COMMENTS_WEBHOOK_URL
   //   ROUTE_SPEC_COMMENTS_WEBHOOK_KEY
   //   AGENT_TOKEN_IDS    comma-separated Access service-token common_names
-  //   SYNC_TOKEN_ID      the spec-sync service token's common_name
+  //   BACKUP_TOKEN_ID    the backup loop's service token common_name (read-only)
+  //   ADMIN_TOKEN_ID     the one-time comment-import service token common_name
   "$schema": "../node_modules/wrangler/config-schema.json",
   "name": "mdview",
   "main": "index.js",

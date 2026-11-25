@@ -74,14 +74,14 @@ describe("access", () => {
     expect(head.status).toBe(401);
   });
 
-  it("maps a human email, an agent token, a sync token, and refuses anyone else", async () => {
+  it("maps a human email and an agent token, and refuses anyone else", async () => {
     const human = await sign(await baseClaims({ email: "Neil@neilsriv.tech" }));
     const agent = await sign(await baseClaims({ common_name: "agent-token" }));
-    const sync = await sign(await baseClaims({ common_name: "sync-token" }));
+    const admin = await sign(await baseClaims({ common_name: "admin-token" }));
     const stranger = await sign(await baseClaims({ email: "someone@example.com" }));
 
     expect((await call("GET", "/api/info", { token: human })).status).toBe(200);
-    expect((await call("GET", "/api/info", { token: sync })).status).toBe(403);
+    expect((await call("GET", "/api/info", { token: admin })).status).toBe(403);
     expect((await call("GET", "/api/info", { token: stranger })).status).toBe(403);
     const unnamed = await call("GET", `/api/agent/threads?scope=${KEY}`, { token: agent });
     expect(unnamed.status).toBe(400);
@@ -264,14 +264,25 @@ describe("webhook", () => {
     expect(new Set(payloads.map((payload) => payload.deliveryId)).size).toBe(1);
     const payload = payloads[0];
     expect(payload).toMatchObject({
-      document: KEY,
-      threadId: created.json.id,
-      author: "neil@neilsriv.tech",
-      body: "Yes, keep it.",
-      quote: "",
-      deliveryId: payload.messageId,
+      source: "mdview",
+      event: "spec-comments",
+      host: "worker",
       link: `${HOST}/view/${KEY}`,
     });
+    expect(payload.threads).toEqual([
+      expect.objectContaining({
+        project: "demo",
+        file: "note.md",
+        vaultPath: "projects/demo/specs/note.md",
+        url: `${HOST}/view/${KEY}`,
+        threadId: created.json.id,
+        status: "open",
+        quote: "",
+        newFromNeil: ["Yes, keep it."],
+      }),
+    ]);
+    expect(typeof payload.deliveryId).toBe("number");
+    expect(payload.threads[0].recent.some((message) => message.body === "Yes, keep it." && message.kind === "human")).toBe(true);
     expect(header(webhook.headers[0], "authorization")).toBe("Bearer test-webhook-key");
     expect(await deliveredCount()).toBe(1);
   });
@@ -302,6 +313,135 @@ describe("webhook", () => {
       expect(await store.pendingCount()).toBe(1);
       expect(Number(raw.get("SELECT count(*) AS n FROM mdview_outbox").n)).toBe(0);
     });
+  });
+});
+
+describe("specs", () => {
+  it("gives two puts of the same If-Match one 200 and one 412, and keeps both texts", async () => {
+    const token = await sign(await baseClaims({ common_name: "agent-token" }));
+    const created = await call("POST", "/api/specs", {
+      token,
+      author: "spec-agent",
+      body: { key: "agent-brain/plan.md", content: "Keep this paragraph.\n", requestId: "spec-new" },
+    });
+    expect(created.status).toBe(201);
+    const first = created.json.sha256;
+    expect(created.headers.get("etag")).toBe(`"${first}"`);
+    const again = await call("POST", "/api/specs", {
+      token,
+      author: "spec-agent",
+      body: { key: "agent-brain/plan.md", content: "nope\n", requestId: "spec-new-2" },
+    });
+    expect(again.status).toBe(409);
+
+    const next = "Keep this paragraph.\n\nA new line.\n";
+    const other = "Keep this paragraph.\n\nOther.\n";
+    const [won, lost] = await Promise.all([
+      call("PUT", "/api/specs/agent-brain/plan.md", {
+        token,
+        author: "spec-agent",
+        body: { content: next, requestId: "spec-put-a" },
+        headers: { "if-match": `"${first}"` },
+      }),
+      call("PUT", "/api/specs/agent-brain/plan.md", {
+        token,
+        author: "spec-agent",
+        body: { content: other, requestId: "spec-put-b" },
+        headers: { "if-match": `"${first}"` },
+      }),
+    ]);
+    const ok = [won, lost].filter((res) => res.status === 200);
+    const stale = [won, lost].filter((res) => res.status === 412);
+    expect(ok).toHaveLength(1);
+    expect(stale).toHaveLength(1);
+    expect(stale[0].json.current.sha256).toBe(ok[0].json.sha256);
+    const winner = ok[0].json.sha256;
+    const winnerText = winner === (await digest(next)) ? next : other;
+    expect(stale[0].json.current.content).toBe(winnerText);
+
+    const old = await call("GET", `/api/specs/agent-brain/plan.md/revisions/${first}`, { token, author: "spec-agent" });
+    const saved = await call("GET", `/api/specs/agent-brain/plan.md/revisions/${winner}`, { token, author: "spec-agent" });
+    expect(old.text).toBe("Keep this paragraph.\n");
+    expect(saved.text).toBe(winnerText);
+    const current = await call("GET", "/api/specs/agent-brain/plan.md", { token, author: "spec-agent" });
+    expect(current.text).toBe(winnerText);
+    expect(current.headers.get("etag")).toBe(`"${winner}"`);
+
+    const replay = await call("PUT", "/api/specs/agent-brain/plan.md", {
+      token,
+      author: "spec-agent",
+      body: { content: "entirely different\n", requestId: ok[0] === won ? "spec-put-a" : "spec-put-b" },
+      headers: { "if-match": `"${first}"` },
+    });
+    expect(replay.status).toBe(200);
+    expect(replay.json.sha256).toBe(winner);
+    expect((await call("GET", "/api/specs/agent-brain/plan.md", { token, author: "spec-agent" })).text).toBe(winnerText);
+  });
+
+  it("refuses a save without If-Match and every write from the backup token", async () => {
+    const agent = await sign(await baseClaims({ common_name: "agent-token" }));
+    const backup = await sign(await baseClaims({ common_name: "backup-token" }));
+    const created = await call("POST", "/api/specs", {
+      token: agent,
+      author: "spec-agent",
+      body: { key: "agent-brain/locked.md", content: "Locked.\n", requestId: "locked-new" },
+    });
+    expect(created.status).toBe(201);
+    const missing = await call("PUT", "/api/specs/agent-brain/locked.md", {
+      token: agent,
+      author: "spec-agent",
+      body: { content: "x\n", requestId: "no-match" },
+    });
+    expect(missing.status).toBe(428);
+
+    const writes = [
+      ["POST", "/api/specs", { key: "agent-brain/other.md", content: "x\n", requestId: "backup-new" }],
+      ["PUT", "/api/specs/agent-brain/locked.md", { content: "x\n", requestId: "backup-put" }],
+      ["POST", "/api/specs/agent-brain/locked.md/move", { to: "agent-brain/archive/locked.md", requestId: "backup-move" }],
+      ["POST", "/api/comments", { path: KEY, sha: await digest(DOC), blockIndex: 0, body: "no", requestId: "backup-comment" }],
+      ["POST", "/api/comments/batch/send", { requestId: "backup-batch" }],
+    ];
+    for (const [method, pathname, body] of writes) {
+      const res = await call(method, pathname, {
+        token: backup,
+        body,
+        headers: { "if-match": created.headers.get("etag") },
+      });
+      expect(res.status, pathname).toBe(403);
+    }
+    const listed = await call("GET", "/api/specs?project=agent-brain", { token: backup });
+    expect(listed.status).toBe(200);
+    expect(listed.json.specs.some((spec) => spec.key === "agent-brain/locked.md")).toBe(true);
+  });
+
+  it("keeps a thread's excerpt after a save, on the old revision too", async () => {
+    const token = await sign(await baseClaims({ common_name: "agent-token" }));
+    const content = "Anchor this paragraph.\n";
+    const created = await call("POST", "/api/specs", {
+      token,
+      author: "spec-agent",
+      body: { key: "agent-brain/anchor.md", content, requestId: "anchor-new" },
+    });
+    expect(created.status).toBe(201);
+    const thread = await call("POST", "/api/agent/threads", {
+      token,
+      author: "spec-agent",
+      body: { path: "agent-brain/anchor.md", quote: "Anchor this", message: "Please keep this.", requestId: "anchor-thread" },
+    });
+    expect(thread.status).toBe(201);
+    const edited = "Anchor this paragraph.\n\nAdded later.\n";
+    const saved = await call("PUT", "/api/specs/agent-brain/anchor.md", {
+      token,
+      author: "spec-agent",
+      body: { content: edited, requestId: "anchor-put" },
+      headers: { "if-match": created.headers.get("etag") },
+    });
+    expect(saved.status).toBe(200);
+    const shown = await call("GET", `/api/agent/threads/${thread.json.id}`, { token, author: "spec-agent" });
+    expect(shown.json.thread.source).toBe("Anchor this paragraph.");
+    expect(shown.json.thread.state).not.toBe("outdated");
+    const old = await call("GET", `/api/specs/agent-brain/anchor.md/revisions/${created.json.sha256}`, { token, author: "spec-agent" });
+    expect(old.text).toBe(content);
   });
 });
 
@@ -353,8 +493,8 @@ async function agentCreate(token, requestId) {
   return created;
 }
 
-async function call(method, pathname, { token, author, body, origin = true } = {}) {
-  const headers = new Headers();
+async function call(method, pathname, { token, author, body, origin = true, headers: extra = {} } = {}) {
+  const headers = new Headers(extra);
   if (token) headers.set("Cf-Access-Jwt-Assertion", token);
   if (author) headers.set("X-Mdview-Author", author);
   let payload;

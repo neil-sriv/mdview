@@ -1,12 +1,12 @@
 /**
  * Posts due outbox rows to the Route spec comments routine.
  *
- * The header is a guess: the Mac script that posts today is not in this
- * repo, so the key goes out as `Authorization: Bearer <key>`. The body is
- * the row's payload, which already includes deliveryId and link.
- * A non-2xx or a network error backs off (1, 2, 4, … 60 min). The same
- * deliveryId is sent on every retry.
+ * Same request the Mac notifier sends: POST, `authorization: Bearer <key>`,
+ * `content-type: application/json`, 15s timeout. A non-2xx or a network error
+ * backs off 1, 2, 4, … 60 min. The body already carries `deliveryId`, so a
+ * retry is the same post.
  */
+import { backoffMs } from "./outbox.js";
 import { storeStub } from "./store.js";
 
 export async function deliverOutbox(env, { now = new Date(), fetcher = fetch } = {}) {
@@ -22,7 +22,9 @@ export async function deliverOutbox(env, { now = new Date(), fetcher = fetch } =
       await stub.markDelivered([Number(row.id)], now.toISOString());
       delivered += 1;
     } else {
-      await stub.markFailed([Number(row.id)], now.toISOString());
+      const attempts = Number(row.attempts) + 1;
+      const nextAt = new Date(now.getTime() + backoffMs(attempts)).toISOString();
+      await stub.markFailed(Number(row.id), nextAt);
       failed += 1;
     }
   }
@@ -34,10 +36,11 @@ async function post(env, url, row, fetcher) {
     const res = await fetcher(url, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${env.ROUTE_SPEC_COMMENTS_WEBHOOK_KEY ?? ""}`,
+        "content-type": "application/json",
+        authorization: `Bearer ${env.ROUTE_SPEC_COMMENTS_WEBHOOK_KEY ?? ""}`,
       },
       body: row.payload,
+      signal: AbortSignal.timeout(15_000),
     });
     await res.arrayBuffer().catch(() => {});
     if (!res.ok) {

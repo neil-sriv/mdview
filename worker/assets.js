@@ -32,6 +32,18 @@ export class AssetSource {
     return this.#open("/index.html");
   }
 
+  async manifest() {
+    return this.#open("/manifest.webmanifest");
+  }
+
+  async worker() {
+    return this.#open("/sw.js");
+  }
+
+  async mermaid() {
+    return this.#open("/vendor/mermaid.min.js");
+  }
+
   async #open(pathname) {
     const res = await this.assets.fetch(`https://mdview.assets${pathname}`);
     if (!res.ok) return null;

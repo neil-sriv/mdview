@@ -4,7 +4,8 @@
  * The JWT is Cf-Access-Jwt-Assertion, signed by ${TEAM_DOMAIN}/cdn-cgi/access/certs,
  * audience POLICY_AUD. email in HUMAN_EMAILS is a human. A service token whose
  * common_name is in AGENT_TOKEN_IDS is an agent, named by X-Mdview-Author.
- * SYNC_TOKEN_ID is the sync identity. Anything else verified is 403.
+ * BACKUP_TOKEN_ID may only read specs. ADMIN_TOKEN_ID is the one-time import.
+ * Anything else verified is 403.
  *
  * No token at all: a browser (or curl -I) is redirected to Access; an API
  * client gets 401. A token that does not verify is 401, redirect or not.
@@ -60,8 +61,8 @@ function mapIdentity(claims, request, env) {
   if (email && emails.has(email.toLowerCase())) return { kind: "human", author: email, session: null };
   const name = typeof claims.common_name === "string" ? claims.common_name.trim() : "";
   if (!name) return null;
-  // Sync wins when one token is listed as both, so a sync token cannot act as an agent.
-  if (name === String(env.SYNC_TOKEN_ID ?? "").trim()) return { kind: "sync", author: name, session: null };
+  if (name === String(env.BACKUP_TOKEN_ID ?? "").trim()) return { kind: "backup", author: name, session: null };
+  if (name === String(env.ADMIN_TOKEN_ID ?? "").trim()) return { kind: "admin", author: name, session: null };
   if (new Set(split(env.AGENT_TOKEN_IDS)).has(name)) {
     return { kind: "agent", author: request.headers.get("X-Mdview-Author") ?? "", session: null };
   }
