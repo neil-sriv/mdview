@@ -14,7 +14,8 @@
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning bin/mdview.mjs",
     "test": "node --disable-warning=ExperimentalWarning --import ./lib/register-peanut.mjs --test \"test/**/*.test.mjs\"",
-    "test:browser": "node --disable-warning=ExperimentalWarning --import ./lib/register-peanut.mjs --test \"test/browser/*.test.mjs\""
+    "test:browser": "node --disable-warning=ExperimentalWarning --import ./lib/register-peanut.mjs --test \"test/browser/*.test.mjs\"",
+    "test:worker": "node worker/prepare-assets.mjs && vitest run --config worker/vitest.config.js"
   },
   "dependencies": {
     "github-slugger": "^2.0.0",
@@ -23,7 +24,16 @@
     "markdown-it-anchor": "^10.0.0",
     "markdown-it-footnote": "^4.0.0",
     "markdown-it-task-lists": "^2.1.1",
+<<<<<<< HEAD
     "mermaid": "^11.17.2",
     "peanut": "github:neil-sriv/peanut#68d3494"
+=======
+    "peanut": "github:neil-sriv/peanut#d0b8e0eb6113da7620ce5d34ba8d5147d29d69cb"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.9.2",
+    "vitest": "^4.1.12",
+    "wrangler": "^4.168.0"
+>>>>>>> 23846b3 (Host comments in one Durable Object behind Access)
   }
 }

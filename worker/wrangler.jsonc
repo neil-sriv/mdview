@@ -1,0 +1,38 @@
+{
+  // Worker for specs.neilsriv.tech. Not deployed by tests.
+  // Before a deploy, run `node worker/prepare-assets.mjs` so public/style.css
+  // and public/vendor-hljs/ exist. Those files are generated and gitignored.
+  //
+  // Secrets, set with `wrangler secret put` (names only, never values):
+  //   ROUTE_SPEC_COMMENTS_WEBHOOK_URL
+  //   ROUTE_SPEC_COMMENTS_WEBHOOK_KEY
+  //   AGENT_TOKEN_IDS    comma-separated Access service-token common_names
+  //   SYNC_TOKEN_ID      the spec-sync service token's common_name
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "mdview",
+  "main": "index.js",
+  "compatibility_date": "2026-11-25",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "traces": { "enabled": true }
+  },
+  "assets": {
+    "directory": "../public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "mdview-specs" }],
+  "durable_objects": {
+    "bindings": [{ "name": "STORE", "class_name": "PeanutStore" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PeanutStore"] }],
+  "triggers": { "crons": ["* * * * *", "17 3 * * *"] },
+  "vars": {
+    "PUBLIC_HOST": "specs.neilsriv.tech",
+    // Placeholder until the Access team name is confirmed.
+    "TEAM_DOMAIN": "https://neilsriv.cloudflareaccess.com",
+    "POLICY_AUD": "replace-with-access-policy-aud",
+    "HUMAN_EMAILS": "neil@neilsriv.tech"
+  }
+}
