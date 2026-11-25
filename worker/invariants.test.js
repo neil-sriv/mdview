@@ -277,6 +277,8 @@ describe("webhook", () => {
         url: `${HOST}/view/${KEY}`,
         threadId: created.json.id,
         status: "open",
+        heading: "",
+        lines: "line 1",
         quote: "",
         newFromNeil: ["Yes, keep it."],
       }),

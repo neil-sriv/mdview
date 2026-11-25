@@ -1,12 +1,14 @@
 /**
  * Specs in R2, which is their source of truth.
  *
- * Current text: `specs/<project>/<path>`. Every save also writes
- * `revs/<project>/<path>/<sha256>.md` before replacing the current object,
- * including a save that then loses the conditional put, so both racers' text
- * stays readable. The HTTP ETag is the sha256. R2's own etag is the MD5, and
- * that is what `onlyIf` matches. A create uses `etagDoesNotMatch: "*"`, which
- * Miniflare and R2 both reject when the key already exists.
+ * Current text: `specs/<project>/<path>`. A save that still matches the
+ * sha256 the caller read also writes `revs/<project>/<path>/<sha256>.md`,
+ * then replaces the current object. A save that loses does not write its
+ * text. The HTTP ETag is the sha256. R2's own etag is the MD5, and that is
+ * what `onlyIf` matches. `onlyIf` is sent on every create and save. This
+ * Miniflare does not enforce it, so the Durable Object spec lock in
+ * worker/store.js is load-bearing: it is what makes the second racer see
+ * the new sha256 and return 412 before anything is written.
  */
 import { sha256 } from "peanut/anchors/markdown-block";
 import { validSpecKey } from "../lib/docs.mjs";

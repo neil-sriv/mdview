@@ -43,10 +43,10 @@ export function clip(text, max) {
  * The JSON `comment-notify.mjs` posts, plus `deliveryId` (the message id) and
  * `link` (`https://<PUBLIC_HOST>/view/<key>`). One row is one message, so
  * `threads` has that one thread and `newFromNeil` has that one body.
- * `heading` and `lines` are empty: peanut computes them on read, and they are
- * not columns. `host` is `worker`.
+ * `heading` and `lines` start empty. Delivery fills them from the thread,
+ * because peanut computes placement on read and it is not stored. `host` is `worker`.
  */
-export function notifyPayload({ key, threadId, messageId, body, quote, status, publicHost, at, recent }) {
+export function notifyPayload({ key, threadId, messageId, body, quote, status, publicHost, at, recent, heading = "", lines = "" }) {
   const [project, ...rest] = String(key).split("/");
   const file = rest.join("/");
   const link = `https://${publicHost}/view/${key}`;
@@ -65,8 +65,8 @@ export function notifyPayload({ key, threadId, messageId, body, quote, status, p
         url: link,
         threadId,
         status: status ?? "open",
-        heading: "",
-        lines: "",
+        heading,
+        lines,
         quote: clip(quote, 600),
         newFromNeil: [clip(body, 1500)],
         recent: recent ?? [],

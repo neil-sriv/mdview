@@ -78,6 +78,8 @@ export function remoteStore(env) {
 async function specOnce(stub, requestId, fn) {
   const prior = await stub.readRequest(requestId);
   if (prior?.hit) return prior.value;
+  // Load-bearing. This Miniflare ignores R2 onlyIf, so without this lock two
+  // saves with the same If-Match can both land. onlyIf is still sent.
   await stub.acquireSpecLock();
   try {
     const again = await stub.readRequest(requestId);
