@@ -1,0 +1,98 @@
+import fs from "node:fs";
+import path from "node:path";
+import { spawn } from "node:child_process";
+import { parseArgs } from "node:util";
+import { startServer } from "../lib/server.mjs";
+import { openAsyncStore, storeHome } from "../lib/store.mjs";
+import { register } from "../lib/registry.mjs";
+import { toPosix } from "../lib/files.mjs";
+
+const USAGE = `Usage: mdview [file-or-folder] [options]
+       mdview comments <verb> [options]
+       mdview specs <command> [options]
+
+Opens a Markdown file or folder in a local reader. "mdview comments --help"
+lists the verbs agents use to read and answer comments. "mdview specs --help"
+lists and edits specs on the Worker.
+
+Options:
+  -r, --root <dir>   Serve this folder (default: the folder you opened, or the file's folder).
+                     Widen it to follow relative links into sibling folders.
+  -p, --port <n>     First port to try (default: 4545; moves up if taken).
+      --no-open      Print the URL without opening a browser.
+  -h, --help         Show this help.`;
+
+function fail(message) {
+  console.error(`mdview: ${message}`);
+  process.exit(1);
+}
+
+async function view(argv) {
+  let args;
+  try {
+    args = parseArgs({
+      args: argv,
+      allowPositionals: true,
+      options: {
+        root: { type: "string", short: "r" },
+        port: { type: "string", short: "p" },
+        "no-open": { type: "boolean" },
+        help: { type: "boolean", short: "h" },
+      },
+    });
+  } catch (err) {
+    fail(`${err.message}\n\n${USAGE}`);
+  }
+
+  const { values, positionals } = args;
+  if (values.help) {
+    console.log(USAGE);
+    return;
+  }
+
+  const target = path.resolve(positionals[0] ?? ".");
+  const stat = fs.statSync(target, { throwIfNoEntry: false });
+  if (!stat) fail(`no such file or folder: ${target}`);
+
+  const root = path.resolve(values.root ?? (stat.isDirectory() ? target : path.dirname(target)));
+  if (!fs.statSync(root, { throwIfNoEntry: false })?.isDirectory()) fail(`--root is not a folder: ${root}`);
+
+  const initial = toPosix(path.relative(root, target));
+  if (initial === ".." || initial.startsWith("../") || path.isAbsolute(initial)) {
+    fail(`${target} is outside --root ${root}`);
+  }
+
+  const port = values.port ? Number(values.port) : 4545;
+  if (!Number.isInteger(port) || port < 1 || port > 65535) fail(`invalid port: ${values.port}`);
+
+  const store = await openAsyncStore().catch((err) => {
+    console.error(`mdview: comments are off because the comment store did not open: ${err.message}`);
+    return null;
+  });
+  const { url, port: listening } = await startServer({ root, initial, port, store });
+  console.log(`mdview serving ${root}`);
+  console.log(`  ${url}`);
+
+  if (store) {
+    const unregister = register(storeHome(), { port: listening, root });
+    process.on("exit", unregister);
+    // SIGHUP stays default, so a viewer started under nohup keeps running when its terminal goes.
+    for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => process.exit(0));
+  }
+
+  if (!values["no-open"]) {
+    const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+    spawn(opener, [url], { stdio: "ignore", detached: true, shell: process.platform === "win32" }).unref();
+  }
+}
+
+const argv = process.argv.slice(2);
+if (argv[0] === "comments") {
+  const { runComments } = await import("../lib/comments-cli.mjs");
+  process.exitCode = await runComments(argv.slice(1));
+} else if (argv[0] === "specs") {
+  const { runSpecs } = await import("../lib/specs-cli.mjs");
+  process.exitCode = await runSpecs(argv.slice(1));
+} else {
+  await view(argv);
+}
