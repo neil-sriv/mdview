@@ -103,7 +103,7 @@ test("a diagram that does not parse says so and shows its source", { skip: chrom
   const result = await page.eval(() => ({
     text: document.querySelector("#doc figure.mermaid-diagram").textContent,
     open: document.querySelector("#doc details.mermaid-source").open,
-    strays: document.querySelectorAll("body > :not(header, .layout, .progress, .toast, .comment-btn, .composer, .versions-menu, svg[hidden], script)").length,
+    strays: document.querySelectorAll("body > :not(header, .layout, .progress, .toast, .comment-btn, .composer, .versions-menu, .lightbox, #offline, #spec-editor, svg[hidden], script)").length,
   }));
   assert.match(result.text, /did not render/);
   assert.equal(result.open, true);

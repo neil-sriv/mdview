@@ -1,0 +1,120 @@
+/* Spec editor. The topbar buttons open it. The box itself is a plain textarea, and a conflict stacks the two texts on a phone. */
+
+.spec-text-btn {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--text);
+}
+.spec-text-btn:hover { background: var(--hover); }
+#edit-spec { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
+#edit-spec:hover { background: color-mix(in srgb, var(--accent) 88%, black); }
+
+.spec-editor {
+  position: fixed;
+  z-index: 25;
+  top: var(--topbar);
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+}
+.spec-editor-top { flex: none; padding: 10px 12px 0; }
+.spec-key-field { display: none; }
+.spec-editor.creating .spec-key-field { display: flex; flex-direction: column; gap: 4px; }
+.spec-key-field span { font-size: var(--text-sm); font-weight: 600; color: var(--text-soft); }
+.spec-key-field input,
+.spec-editor textarea,
+.spec-pane pre {
+  font-family: var(--mono);
+  font-size: 16px;
+  line-height: 1.45;
+}
+.spec-key-field input {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--text);
+}
+.spec-status,
+.spec-conflict-note,
+.spec-kept,
+.spec-previous p { margin: 8px 0 0; }
+.spec-conflict-note { font-weight: 600; }
+.spec-kept,
+.spec-previous p { color: var(--text-soft); font-size: var(--text-md); }
+
+.spec-panes {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 12px;
+}
+.spec-editor.conflict .spec-panes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.spec-pane { min-height: 0; display: flex; flex-direction: column; }
+.spec-pane h2 { flex: none; margin: 0 0 6px; font-size: var(--text-md); font-weight: 600; }
+.spec-editor:not(.conflict) #spec-draft-heading { display: none; }
+.spec-pane pre,
+.spec-editor textarea {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-soft);
+  color: var(--text);
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.spec-editor textarea { background: var(--bg); resize: none; }
+.spec-editor textarea:focus,
+.spec-key-field input:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+
+.spec-previous,
+.spec-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+}
+.spec-editor-actions {
+  flex: none;
+  border-top: 1px solid var(--border);
+  padding-bottom: calc(8px + env(safe-area-inset-bottom));
+}
+.spec-previous { flex: none; padding-top: 0; padding-bottom: 0; }
+.spec-editor-actions .btn,
+.spec-previous .btn { min-height: 44px; padding: 10px 14px; font-size: 16px; }
+.spec-editor-actions .btn { flex: 1 1 160px; }
+#spec-save { flex: 2 1 220px; }
+.spec-editor button:disabled { opacity: 0.6; }
+
+@media (max-width: 820px) {
+  :root { --topbar: 56px; }
+  .spec-text-btn { height: 44px; padding: 0 12px; font-size: 16px; }
+  .spec-editor.conflict .spec-panes {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+html[data-offline="1"] .spec-editor { top: calc(var(--topbar) + var(--offline-h, 0px)); }
+html.spec-editing { overflow: hidden; }

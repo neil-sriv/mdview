@@ -8,6 +8,7 @@ A local Markdown reader. Point it at a file or a folder, and it opens a browser 
 - a file sidebar you can filter, and an "On this page" outline that follows your scroll
 - relative links between documents that open in the viewer, with images served alongside
 - live reload: save the file and the page updates without losing your place
+- edit a spec in a plain text box, with the current text beside your draft when someone else saved first
 - light and dark themes that follow the system, or pick one
 
 ## Setup
@@ -43,6 +44,10 @@ Paths are relative to the page, so this works through a proxy that rewrites the 
 |---|---|
 | `/` | filter files (Enter opens the first match, Esc clears) |
 | `\` | show or hide the file list |
+
+## Editing a spec
+
+On a spec (`project/name.md`, or `project/archive/name.md`), **Edit** opens the Markdown in a text box. **New** starts one. **Save** writes it with the version you opened. If the spec changed in the meantime, the page shows that text and your draft, side by side, or stacked on a narrow screen. You can copy your draft, reload the latest, or overwrite with your draft after reading both. The draft stays in the browser until a save succeeds. A key that already exists gets the same choice.
 
 A toggle's first line is its title. Everything else in the item, including nested bullets and other toggles, shows once you open it:
 
@@ -83,7 +88,7 @@ To keep an agent from reacting to each comment in turn, batch them. The chevron 
 
 Only you can delete, and only in the viewer: **Delete thread** in a card's ⋯ menu removes the whole thread (picking it is the confirmation), and the × beside a reply removes that reply. Deleting is permanent. When a doc's last thread goes, mdview drops its stored versions too. [`skills/mdview-comments/SKILL.md`](skills/mdview-comments/SKILL.md) teaches an agent this loop. Copy it into your agent's skills folder.
 
-mdview never writes your docs. Comments live in `~/.mdview/peanut.sqlite3` (set `MDVIEW_HOME` to move it), kept by [peanut](../peanut), the comment library mdview shares with diffview, and keyed by each file's real path. Once a doc has a comment, mdview keeps a copy of each version of it that it sees, and each comment remembers the version it was made on:
+mdview writes a file when you save a spec from the page. Other files stay as they are. Comments live in `~/.mdview/peanut.sqlite3` (set `MDVIEW_HOME` to move it), kept by [peanut](../peanut), the comment library mdview shares with diffview, and keyed by each file's real path. Once a doc has a comment, mdview keeps a copy of each version of it that it sees, and each comment remembers the version it was made on:
 
 - A comment follows the doc into later versions while its paragraph, heading, list item, code block or table row keeps the same text. Reflowing a paragraph or renumbering a list does not change that.
 - When the text changes, the comment is marked outdated and moves to the "On older versions" list. It shows what the text now reads and links to the version it was made on.

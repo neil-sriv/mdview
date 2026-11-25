@@ -25,6 +25,7 @@
 
 .crumbs {
   display: flex;
+  flex: 1 1 auto;
   align-items: center;
   gap: 6px;
   min-width: 0;
@@ -59,7 +60,7 @@ button.crumbs:focus-visible .icon { opacity: 1; }
   font-variant-numeric: tabular-nums;
 }
 
-.actions { display: flex; align-items: center; gap: 2px; }
+.actions { display: flex; align-items: center; gap: 2px; flex: none; }
 
 .icon-btn {
   display: inline-grid;
