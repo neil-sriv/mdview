@@ -25,7 +25,7 @@
     "markdown-it-footnote": "^4.0.0",
     "markdown-it-task-lists": "^2.1.1",
     "mermaid": "^11.17.2",
-    "peanut": "github:neil-sriv/peanut#68d3494"
+    "peanut": "github:neil-sriv/peanut#857d7c47a60ea5f6761090a5a5288ca710756b7a"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.9.2",

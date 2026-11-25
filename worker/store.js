@@ -12,8 +12,8 @@
  */
 import { DurableObject } from "cloudflare:workers";
 import { AnchorError, doSqlite, PeanutStore as Comments, Registry, StoreError } from "peanut";
-import { mdviewApp } from "../lib/peanut-app.mjs";
-import { AsyncStore, renameStoredDoc, StoreError as ViewError } from "../lib/store.mjs";
+import { DOC, mdviewApp } from "../lib/peanut-app.mjs";
+import { AsyncStore, StoreError as ViewError } from "../lib/store.mjs";
 import { OUTBOX_SQL, withOutbox } from "./outbox.js";
 
 const registry = new Registry().register(mdviewApp);
@@ -196,7 +196,15 @@ export class PeanutStore extends DurableObject {
   }
 
   async renameDocument(from, to) {
-    return this.#call(() => this.#peanut.write((db) => renameStoredDoc(db, from, to)));
+    if (!from || from === to) return;
+    return this.#call(async () => {
+      try {
+        await this.#peanut.renameDocument(DOC, from, to);
+      } catch (err) {
+        if (err instanceof StoreError && String(err.message).startsWith("No tracked document ")) return;
+        throw err;
+      }
+    });
   }
 
   async humanCounts() {
