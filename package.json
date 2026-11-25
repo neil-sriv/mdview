@@ -13,8 +13,8 @@
   },
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning bin/mdview.mjs",
-    "test": "node --disable-warning=ExperimentalWarning --test \"test/**/*.test.mjs\"",
-    "test:browser": "node --disable-warning=ExperimentalWarning --test \"test/browser/*.test.mjs\""
+    "test": "node --disable-warning=ExperimentalWarning --import ./lib/register-peanut.mjs --test \"test/**/*.test.mjs\"",
+    "test:browser": "node --disable-warning=ExperimentalWarning --import ./lib/register-peanut.mjs --test \"test/browser/*.test.mjs\""
   },
   "dependencies": {
     "github-slugger": "^2.0.0",
@@ -24,6 +24,6 @@
     "markdown-it-footnote": "^4.0.0",
     "markdown-it-task-lists": "^2.1.1",
     "mermaid": "^11.17.2",
-    "peanut": "file:../peanut"
+    "peanut": "github:neil-sriv/peanut#68d3494"
   }
 }
