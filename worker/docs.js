@@ -158,12 +158,12 @@ export class R2DocSource {
     return obj.text();
   }
 
-  async createSync({ key, content, by, at }) {
+  async createSync({ key, content, by, at, sourceRev }) {
     if (await this.bucket.head(specObject(key))) return specResult(409, "exists", `A spec already exists at ${key}.`);
     const hash = sha256(content);
-    await this.#keep(key, hash, content, at, by);
+    await this.#keep(key, hash, content, at, by, sourceRev);
     try {
-      await this.bucket.put(specObject(key), content, putOptions(hash, at, by, { etagDoesNotMatch: "*" }));
+      await this.bucket.put(specObject(key), content, putOptions(hash, at, by, { etagDoesNotMatch: "*" }, sourceRev));
     } catch (err) {
       if (isPrecondition(err)) return specResult(409, "exists", `A spec already exists at ${key}.`);
       throw err;
@@ -217,8 +217,19 @@ export class R2DocSource {
     return { status: 200, key: to, sha256: current.sha256, fromKey: from, toKey: to };
   }
 
-  async #keep(key, hash, content, at, by) {
-    await this.bucket.put(revObject(key, hash), content, putOptions(hash, at, by));
+  /** A revision text threads already cite. Does not replace the current spec. */
+  async putRevision({ key, content, sha256: expected, by, at, sourceRev }) {
+    if (!validSpecKey(key)) return specResult(400, "bad_key", "That is not a spec key.");
+    if (typeof content !== "string" || typeof expected !== "string") return specResult(400, "bad_request", "A revision needs content and sha256.");
+    const hash = sha256(content);
+    if (hash !== expected.toLowerCase()) return specResult(400, "bad_hash", "sha256 does not match the content.");
+    if (!(await this.bucket.head(specObject(key)))) return specResult(404, "not_found", `No spec ${key}.`);
+    await this.#keep(key, hash, content, at, by, sourceRev);
+    return { status: 201, sha256: hash };
+  }
+
+  async #keep(key, hash, content, at, by, sourceRev) {
+    await this.bucket.put(revObject(key, hash), content, putOptions(hash, at, by, undefined, sourceRev));
   }
 
   async #copyRevs(from, to) {
@@ -285,15 +296,14 @@ function shaFromRevKey(objectKey) {
   return name.endsWith(".md") ? name.slice(0, -3) : name;
 }
 
-function putOptions(hash, at, by, onlyIf) {
-  const options = {
-    httpMetadata: { contentType: TYPE },
-    customMetadata: {
-      sha256: hash,
-      updatedAt: at || new Date().toISOString(),
-      updatedBy: by || "",
-    },
+function putOptions(hash, at, by, onlyIf, sourceRev) {
+  const customMetadata = {
+    sha256: hash,
+    updatedAt: at || new Date().toISOString(),
+    updatedBy: by || "",
   };
+  if (sourceRev) customMetadata.sourceRev = sourceRev;
+  const options = { httpMetadata: { contentType: TYPE }, customMetadata };
   if (onlyIf) options.onlyIf = onlyIf;
   return options;
 }

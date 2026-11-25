@@ -2,9 +2,9 @@
  * One Durable Object, idFromName("store"), holding every comment.
  *
  * Migrations run in the constructor under blockConcurrencyWhile. RPC is
- * peanut's PeanutStore, plus the outbox (outboxDue, markDelivered, markFailed)
- * and pruneRequests. importJson waits for the spec-sync PR: the export shape
- * lands with it.
+ * peanut's PeanutStore, plus the outbox (outboxDue, markDelivered, markFailed),
+ * pruneRequests, and importJson. importJson loads one Mac export, in one
+ * transaction, and only when the store is empty unless forced.
  *
  * The Worker talks to the stub through remoteStore(), which is the async
  * store handle() already uses. onWrite cannot cross RPC; the change feed
@@ -15,6 +15,7 @@ import { AnchorError, doSqlite, PeanutStore as Comments, Registry, StoreError } 
 import { DOC, mdviewApp } from "../lib/peanut-app.mjs";
 import { AsyncStore, StoreError as ViewError } from "../lib/store.mjs";
 import { OUTBOX_SQL, withOutbox } from "./outbox.js";
+import { TransferError, importInto, parityFromEntries } from "../lib/transfer.mjs";
 
 const registry = new Registry().register(mdviewApp);
 
@@ -58,6 +59,8 @@ export function remoteStore(env) {
   // The request id is recorded after the bucket accepts the write.
   store.once = (requestId, fn) => specOnce(stub, requestId, fn);
   store.renameDocument = (from, to) => call(stub.renameDocument(from, to));
+  store.importJson = (payload) => call(stub.importJson(strip(payload)));
+  store.parity = () => call(stub.parity());
   store.waitingOnHumanCountsIn = async (keys) => {
     const want = new Set(keys);
     const rows = await call(stub.humanCounts());
@@ -262,6 +265,37 @@ export class PeanutStore extends DurableObject {
 
   async pruneRequests(nowIso) {
     return this.#call(() => this.#peanut.pruneRequests(new Date(nowIso)));
+  }
+
+  async importJson(payload) {
+    return this.#call(() => {
+      try {
+        return importInto(this.#db, payload);
+      } catch (err) {
+        if (err instanceof TransferError) return { ok: false, error: err.code, message: err.message };
+        throw err;
+      }
+    });
+  }
+
+  async parity() {
+    return this.#call(async () => {
+      const docs = await this.#peanut.documents([{ type: DOC, keyPrefix: "" }]);
+      const entries = [];
+      for (const doc of docs) {
+        const found = await this.#peanut.threadsAt(DOC, doc.key, { includePending: true });
+        entries.push({
+          key: doc.key,
+          threads: (found?.threads ?? []).map((thread) => ({
+            id: Number(thread.id),
+            state: thread.state,
+            blockIndex: thread.placement?.blockIndex ?? null,
+            waitingOn: thread.waitingOn ?? null,
+          })),
+        });
+      }
+      return parityFromEntries(entries);
+    });
   }
 
   async #call(fn) {
