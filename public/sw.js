@@ -288,7 +288,10 @@ function linksIn(text, url) {
   };
   for (const match of text.matchAll(/(?:["'`(])(\/static\/[^"'`()\s?#]+)/g)) accept(match[1]);
   if (base.pathname.endsWith(".js")) {
-    for (const match of text.matchAll(/["'](\.[^"']+\.js)["']/g)) accept(new URL(match[1], base).pathname);
+    // Only real module specifiers: `from "./x.js"`, `import "./x.js"`, `import("./x.js")`.
+    // Any quoted "./x.js" also matched the module ids esbuild leaves in the
+    // vendored mermaid bundle (`"../../node_modules/.pnpm/…js"`), 45 404s a sync.
+    for (const match of text.matchAll(/(?:\bfrom\s*|\bimport\s*\(?\s*)["'](\.\.?\/[^"']+\.js)["']/g)) accept(new URL(match[1], base).pathname);
   }
   if (base.pathname.endsWith(".css")) {
     for (const match of text.matchAll(/url\(\s*["']?([^"')]+)["']?\s*\)/g)) {
