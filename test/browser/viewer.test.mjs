@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { chromeMissing, sharedChrome } from "../helpers/browser.mjs";
 import { AGENT, HUMAN, startViewer } from "../helpers/viewer.mjs";
-import { chooseBatching, click, comment, highlighted, openComposer, select } from "../helpers/viewer-page.mjs";
+import { chooseBatching, click, comment, highlighted, openComposer, select, selectWithoutMouseup } from "../helpers/viewer-page.mjs";
 
 const row = (cells) => `| ${cells.join(" | ")} |`;
 const table = (head, body) => [row(head), row(head.map(() => "---")), ...body.map(row)].join("\n");
@@ -50,6 +50,25 @@ function threadOn(viewer, quote, body = "A comment.") {
   const file = viewer.file("plan.md");
   return viewer.store.createThread({ file, content: fs.readFileSync(file, "utf8"), quote, body, author: HUMAN });
 }
+
+test("selecting text shows the comment button without a mouseup", { skip: chromeMissing }, async (t) => {
+  const { page } = await setup(t);
+  await selectWithoutMouseup(page, "the agent writes the store");
+  await page.waitFor(() => !document.querySelector("#comment-btn").hidden, { what: "the comment button to appear" });
+  // iOS Safari often clears the selection on the tap, after pointerdown.
+  await page.eval(() => {
+    const button = document.querySelector("#comment-btn");
+    button.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, button: 0, pointerId: 1, pointerType: "touch", isPrimary: true }));
+    getSelection().removeAllRanges();
+    document.dispatchEvent(new Event("selectionchange"));
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+  });
+  await page.waitFor(() => !document.querySelector("#composer").hidden, { what: "the composer to open" });
+  assert.equal(await page.eval(() => document.querySelector("#composer-quote").textContent), "the agent writes the store");
+  await page.eval(() => document.querySelector("#composer-cancel").click());
+  await page.eval(() => getSelection().removeAllRanges());
+  await page.waitFor(() => document.querySelector("#comment-btn").hidden, { what: "the comment button to hide" });
+});
 
 test("a comment on a selection highlights exactly its quote", { skip: chromeMissing }, async (t) => {
   const { page, viewer } = await setup(t);
