@@ -72,8 +72,17 @@ export function initComments() {
   });
 
   const commentButton = $("#comment-btn");
+  // preventDefault keeps the selection from collapsing. pointerdown is what iOS
+  // fires first; mousedown is too late, and a later click may never come.
+  commentButton.addEventListener("pointerdown", (event) => {
+    if (event.button) return;
+    event.preventDefault();
+    openComposer();
+  });
   commentButton.addEventListener("mousedown", (event) => event.preventDefault());
-  commentButton.addEventListener("click", openComposer);
+  commentButton.addEventListener("click", () => {
+    if ($("#composer").hidden) openComposer();
+  });
   $("#composer-cancel").addEventListener("click", () => {
     state.comments.composerText = "";
     closeComposer();
@@ -116,13 +125,12 @@ export function initComments() {
   });
 
   // A click inside the selection collapses it only after mouseup, so check on the next tick.
+  // Touch and iOS long-press selections never fire mouseup; selectionchange covers those.
   document.addEventListener("mouseup", () => setTimeout(updateCommentButton));
   document.addEventListener("keyup", (event) => {
     if (event.shiftKey || event.key === "Shift") updateCommentButton();
   });
-  document.addEventListener("selectionchange", () => {
-    if (getSelection().isCollapsed) $("#comment-btn").hidden = true;
-  });
+  document.addEventListener("selectionchange", updateCommentButton);
   $("#toc").addEventListener("click", (event) => {
     const mark = event.target.closest(".toc-mark");
     if (mark) jumpToThread(Number(mark.dataset.thread));

@@ -1,8 +1,8 @@
 /** What a person does in the viewer, done through a browser.mjs page. */
 
-/** Selects the first occurrence of `text` in the doc, as a mouse drag would. It must sit in one text node. */
-export async function select(page, text) {
-  const found = await page.eval((needle) => {
+/** Selects the first occurrence of `text` in the doc. It must sit in one text node. */
+async function selectText(page, text, { mouseup = false } = {}) {
+  const found = await page.eval((needle, mouseup) => {
     const walker = document.createTreeWalker(document.querySelector("#doc"), NodeFilter.SHOW_TEXT);
     while (walker.nextNode()) {
       const node = walker.currentNode;
@@ -13,12 +13,22 @@ export async function select(page, text) {
       range.setEnd(node, at + needle.length);
       getSelection().removeAllRanges();
       getSelection().addRange(range);
-      document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      if (mouseup) document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
       return true;
     }
     return false;
-  }, text);
+  }, text, mouseup);
   if (!found) throw new Error(`No text node in the doc contains ${JSON.stringify(text)}`);
+}
+
+/** Selects the first occurrence of `text` in the doc, as a mouse drag would. It must sit in one text node. */
+export async function select(page, text) {
+  await selectText(page, text, { mouseup: true });
+}
+
+/** Selects `text` the way a touch or iOS long-press does: a range, and no mouseup. */
+export async function selectWithoutMouseup(page, text) {
+  await selectText(page, text);
 }
 
 /** Opens the composer on the current selection with the keyboard shortcut. */
