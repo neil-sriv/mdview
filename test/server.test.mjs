@@ -129,7 +129,8 @@ test("the viewer page may run scripts only from /static/js/", async () => {
   const res = await get("/view/notes/plan.md");
   const policy = res.headers["content-security-policy"];
 
-  assert.match(policy, new RegExp(`script-src http://127\\.0\\.0\\.1:${port}/static/js/(;|$)`));
+  assert.match(policy, new RegExp(`script-src http://127\\.0\\.0\\.1:${port}/static/js/ https://static\\.cloudflareinsights\\.com(;|$)`));
+  assert.match(policy, /connect-src 'self' https:\/\/cloudflareinsights\.com/);
   assert.match(policy, /worker-src 'self'/);
   assert.match(policy, /manifest-src 'self'/);
   assert.match(policy, /object-src 'none'/);

@@ -1,7 +1,7 @@
 /** The document: loading and rendering it, its outline and breadcrumbs, and live reload. */
 import { $, copyText, getJson, openTogglesAround, root } from "./dom.js";
 import { ago, escapeHtml } from "./lib/format.js";
-import { encodePath } from "./lib/paths.js";
+import { docRequestPath, encodePath } from "./lib/paths.js";
 import { drawDiagrams, prepareDiagrams } from "./mermaid.js";
 import { scheduleScrollUpdate, updateScroll } from "./scroll.js";
 import { expandAncestors, refreshTree, renderTree, revealActiveFile } from "./sidebar.js";
@@ -176,8 +176,13 @@ function versionBanner(doc) {
 export async function loadDoc(rel, { keepScroll = false, hash = location.hash, version = state.viewVersion } = {}) {
   let doc;
   $("#versions-menu").hidden = true;
+  const path = docRequestPath(rel, state.info?.initial);
+  if (!path) {
+    showError(rel, new Error("No document to open."));
+    return;
+  }
   try {
-    doc = await getJson(`/api/doc?path=${encodeURIComponent(rel)}${version ? `&v=${version}` : ""}`);
+    doc = await getJson(`/api/doc?path=${encodeURIComponent(path)}${version ? `&v=${version}` : ""}`);
   } catch (err) {
     showError(rel, err);
     return;

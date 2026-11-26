@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ago, escapeHtml, truncate } from "../../public/js/lib/format.js";
-import { encodePath, relFromPathname, versionFromSearch } from "../../public/js/lib/paths.js";
+import { docRequestPath, encodePath, relFromPathname, versionFromSearch } from "../../public/js/lib/paths.js";
 import { placeTick } from "../../public/js/lib/ticks.js";
 import { buildTree } from "../../public/js/lib/tree.js";
 
@@ -23,9 +23,20 @@ test("doc paths round-trip through viewer URLs", () => {
   assert.equal(encodePath("a b/c#d.md"), "a%20b/c%23d.md");
   assert.equal(relFromPathname("/view/a%20b/c%23d.md"), "a b/c#d.md");
   assert.equal(relFromPathname("/view/%E0%A4%A"), "");
+  assert.equal(relFromPathname("/"), "");
+  assert.equal(relFromPathname("/view"), "");
+  assert.equal(relFromPathname("/view/"), "");
   assert.equal(versionFromSearch("?v=3"), 3);
   assert.equal(versionFromSearch(""), null);
   assert.equal(versionFromSearch("?v=x"), null);
+});
+
+test("an empty viewer path loads the initial doc and does not request /api/doc?path=", () => {
+  assert.equal(docRequestPath("notes/plan.md", "README.md"), "notes/plan.md");
+  assert.equal(docRequestPath("", "README.md"), "README.md");
+  assert.equal(docRequestPath("/", "agent-brain/how-it-works.md"), "agent-brain/how-it-works.md");
+  assert.equal(docRequestPath("", ""), "");
+  assert.equal(docRequestPath(undefined, ""), "");
 });
 
 test("a tick lands in its section, as far down as the comment is", () => {

@@ -20,3 +20,10 @@ test("the offline crawl follows real module imports and skips module ids inside 
   assert.deepEqual([...linksIn(app, "/static/js/main.js")].sort(), ["/static/b.js", "/static/js/c.js", "/static/js/d.js", "/static/js/lib/a.js"]);
   assert.deepEqual([...linksIn(bundle, "/static/js/vendor/mermaid.min.js")], []);
 });
+
+test("the offline cache does not request a doc with an empty path", () => {
+  const { docUrl } = loadSw();
+  assert.equal(docUrl(""), null);
+  assert.equal(docUrl(undefined), null);
+  assert.equal(docUrl("notes/plan.md"), "/api/doc?path=notes%2Fplan.md");
+});
