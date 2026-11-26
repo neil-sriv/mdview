@@ -343,6 +343,12 @@ async function readJson(cache, url) {
   }
 }
 
+/** The cache and fetch URL for a rendered doc, or null when there is no path. */
+function docUrl(path) {
+  if (!path) return null;
+  return `/api/doc?path=${encodeURIComponent(path)}`;
+}
+
 async function cacheDocs() {
   const res = await fetchWithin("/api/docs");
   if (!res.ok) throw new Error(`catalog ${res.status}`);
@@ -358,8 +364,8 @@ async function cacheDocs() {
   let offline = false;
   await mapPool(catalog.docs, async (doc) => {
     if (offline) return;
-    const url = `/api/doc?path=${encodeURIComponent(doc.path)}`;
-    if (prevDocs.get(doc.path) === doc.etag && (await cache.match(url))) return;
+    const url = docUrl(doc.path);
+    if (!url || (prevDocs.get(doc.path) === doc.etag && (await cache.match(url)))) return;
     try {
       const docRes = await fetchWithin(url);
       if (docRes.ok) await putStamped(cache, url, docRes);
@@ -369,18 +375,13 @@ async function cacheDocs() {
     }
   });
   for (const [path] of prevDocs) {
-    if (!current.has(path)) await cache.delete(`/api/doc?path=${encodeURIComponent(path)}`);
+    const url = docUrl(path);
+    if (url && !current.has(path)) await cache.delete(url);
   }
 
-  // The folder index the home screen opens, which the page asks for as an empty path.
-  if (!offline) {
-    try {
-      const indexRes = await fetchWithin("/api/doc?path=");
-      if (indexRes.ok) await putStamped(cache, "/api/doc?path=", indexRes);
-    } catch {
-      offline = true;
-    }
-  }
+  // The home document is whatever /api/info.initial names; the page loads
+  // that path instead of asking for /api/doc?path=, and the catalog already
+  // cached it above.
 
   if (!offline) {
     for (const url of ["/api/tree", "/api/info", "/api/inbox"]) {

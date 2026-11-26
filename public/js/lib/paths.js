@@ -6,10 +6,16 @@ export function encodePath(rel) {
 
 export function relFromPathname(pathname) {
   try {
-    return pathname.replace(/^\/view\/?/, "").split("/").map(decodeURIComponent).join("/");
+    const rel = pathname.replace(/^\/view\/?/, "").split("/").map(decodeURIComponent).join("/");
+    return rel === "/" ? "" : rel;
   } catch {
     return "";
   }
+}
+
+/** The file /api/doc should be asked for, or "" when the URL and initial doc are both empty. */
+export function docRequestPath(rel, initial = "") {
+  return (rel && rel !== "/" ? rel : "") || initial || "";
 }
 
 /** The thread a URL asks to open (?thread=12), or null. */
