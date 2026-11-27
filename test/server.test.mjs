@@ -205,6 +205,20 @@ test("a doc's first comment tracks it, and comments come back rendered and escap
   assert.match(threads[0].messages[0].bodyHtml, /&lt;script&gt;/);
 });
 
+test("/api/doc?comments=1 carries the doc's threads, as /api/comments answers them", async () => {
+  const doc = await docJson("notes/plan.md");
+  const withThreads = JSON.parse((await get("/api/doc?path=notes/plan.md&comments=1")).body);
+  const separate = JSON.parse((await get(`/api/comments?path=notes/plan.md&sha=${doc.sha}`)).body);
+
+  assert.equal(withThreads.sha, doc.sha);
+  assert.equal(withThreads.html, doc.html);
+  assert.ok(separate.threads.length > 0);
+  assert.deepEqual(withThreads.comments, separate);
+  assert.equal(doc.comments, undefined, "plain /api/doc stays as it was");
+  const old = JSON.parse((await get("/api/doc?path=notes/plan.md&v=1&comments=1")).body);
+  assert.deepEqual(old.comments, JSON.parse((await get(`/api/comments?path=notes/plan.md&sha=${old.sha}`)).body));
+});
+
 test("stored versions render read-only, and the version list counts their threads", async () => {
   await fs.writeFile(path.join(dir, "notes", "plan.md"), "# Plan\n\n## Step one\n\nA new paragraph.\n");
 
@@ -337,6 +351,34 @@ test("a write from another process streams a comments event", async () => {
     }, 3000);
   });
 
+  assert.match(stream, /event: comments/);
+});
+
+test("a comment made after /api/doc read the threads, before the stream opened, still streams a comments event", async () => {
+  const file = path.join(dir, "README.md");
+  const doc = JSON.parse((await get("/api/doc?path=README.md&comments=1")).body);
+  assert.equal(typeof doc.changeToken, "string");
+  store.createThread({ file, content: await fs.readFile(file, "utf8"), blockIndex: 1, body: "in the gap", author: AGENT });
+
+  const stream = await new Promise((resolve, reject) => {
+    let timer;
+    const req = http.get({ host: "127.0.0.1", port, path: `/api/events?path=README.md&since=${encodeURIComponent(doc.changeToken)}`, headers: { Host: `127.0.0.1:${port}` } }, (res) => {
+      let data = "";
+      res.on("data", (chunk) => {
+        data += chunk;
+        if (data.includes("event: comments")) {
+          clearTimeout(timer);
+          req.destroy();
+          resolve(data);
+        }
+      });
+    });
+    req.on("error", () => {});
+    timer = setTimeout(() => {
+      req.destroy();
+      reject(new Error("no comments event within 3s"));
+    }, 3000);
+  });
   assert.match(stream, /event: comments/);
 });
 

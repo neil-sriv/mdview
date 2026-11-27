@@ -11,7 +11,7 @@ import { composerOpen } from "./comments/composer.js";
 import { editorOpen, initSpecEditor, restoreSpecEditor, syncEditButton } from "./spec-editor.js";
 import { forgetRanges, initComments, jumpToThread, loadComments, onLayoutChange, resetComments } from "./comments/index.js";
 import { $, copyText, getJson, toast } from "./dom.js";
-import { docHooks, loadDoc, renderMeta, showError, watchToggles } from "./doc.js";
+import { docHooks, fetchDoc, loadDoc, renderMeta, showError, watchToggles } from "./doc.js";
 import { showInbox } from "./inbox.js";
 import { encodePath, relFromPathname, threadFromSearch, versionFromSearch } from "./lib/paths.js";
 import { closeLightbox, watchImages } from "./lightbox.js";
@@ -71,6 +71,12 @@ async function init() {
   initMobile();
   setInterval(renderMeta, 30_000);
 
+  // A URL that names a doc does not need /api/info to find it: ask for it, and its
+  // threads, alongside the info and the file list instead of after them.
+  const rel = location.pathname === "/inbox" ? "" : relFromPathname(location.pathname);
+  const version = versionFromSearch(location.search);
+  const early = rel && rel !== "/" ? fetchDoc(rel, version) : null;
+  early?.catch(() => {}); // loadDoc reports a failure; this only keeps it from being unhandled meanwhile.
   try {
     const [info, tree] = await Promise.all([getJson("/api/info"), getJson("/api/tree")]);
     state.info = info;
@@ -89,7 +95,7 @@ async function init() {
     return;
   }
   state.comments.activateAfterLoad = threadFromSearch(location.search);
-  await loadDoc(relFromPathname(location.pathname), { version: versionFromSearch(location.search) });
+  await loadDoc(rel, { version, prefetched: early });
   await restoreSpecEditor();
 }
 

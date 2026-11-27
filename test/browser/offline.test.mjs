@@ -50,7 +50,7 @@ test("a saved doc opens offline, with the time it was cached and comments disabl
   });
   assert.equal(await page.eval(() => document.querySelector("#offline").hidden), true);
   assert.equal(await page.eval(async () => (await caches.match("/raw/dot.png"))?.status ?? 0), 200);
-  assert.equal(await page.eval(async () => (await caches.match("/api/doc?path=other.md"))?.ok ?? false), true);
+  assert.equal(await page.eval(async () => (await caches.match("/api/doc?path=other.md&comments=1"))?.ok ?? false), true);
 
   await viewer.disconnect();
   await viewer.write("plan.md", "# Plan\n\nCHANGED ONLINE ONLY\n");
@@ -174,7 +174,7 @@ test("a connect that never answers serves a cached doc, including one whose view
   const { viewer, page } = await openCached(t, 47630);
   const otherUrl = new URL("/view/other.md", viewer.url).href;
   assert.equal(await page.eval(async (url) => (await caches.match(url)) != null, otherUrl), false);
-  assert.equal(await page.eval(async () => (await caches.match("/api/doc?path=other.md"))?.ok ?? false), true);
+  assert.equal(await page.eval(async () => (await caches.match("/api/doc?path=other.md&comments=1"))?.ok ?? false), true);
   await viewer.write("other.md", "# Other\n\nCHANGED TOO\n");
 
   await viewer.disconnect();
