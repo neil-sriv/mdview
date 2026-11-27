@@ -96,6 +96,19 @@ export class R2DocSource {
     return { body: obj.body, size: obj.size, ext: dot === -1 ? "" : path.slice(dot).toLowerCase() };
   }
 
+  /**
+   * What /api/docs answers on the Worker: every spec, with its sha256 as the
+   * etag, so the offline cache refetches only the docs that changed. Specs in
+   * R2 have no images. lib/catalog.mjs walks the Mac's disk instead.
+   */
+  async catalog(imageBytes) {
+    const specs = await this.listSpecs();
+    const docs = specs
+      .filter((spec) => MARKDOWN.test(spec.key))
+      .map((spec) => ({ path: spec.key, mtimeMs: Date.parse(spec.updatedAt), size: spec.size, sha: spec.sha256, etag: spec.sha256 || `${spec.updatedAt}:${spec.size}` }));
+    return { imageBytes, imagesOmitted: 0, docs, images: [] };
+  }
+
   async listSpecs({ project, prefix, since } = {}) {
     const objects = await listAll(this.bucket, SPEC);
     const specs = [];

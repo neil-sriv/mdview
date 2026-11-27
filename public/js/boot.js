@@ -73,14 +73,26 @@
     else if (data.type === "offline") showOffline(data.cachedAt, data.doc);
   });
 
-  function requestSync() {
+  // A sync refetches the page, the catalog and any doc that changed; the hashed build
+  // comes from the cache. Focus and the timer ask at most once a minute, and the timer
+  // only while the tab is shown. Coming back online always asks.
+  var SYNC_GAP_MS = 60000;
+  var lastSync = 0;
+  function requestSync(force) {
+    if (force !== true && Date.now() - lastSync < SYNC_GAP_MS) return;
+    lastSync = Date.now();
     navigator.serviceWorker.ready.then(function (reg) {
       if (reg.active) reg.active.postMessage({ type: "sync" });
     }).catch(function () {});
   }
-  navigator.serviceWorker.register("/sw.js").then(requestSync).catch(function () {});
-  addEventListener("load", requestSync);
+  navigator.serviceWorker.register("/sw.js").then(function () {
+    requestSync(true);
+  }).catch(function () {});
   addEventListener("focus", requestSync);
-  addEventListener("online", requestSync);
-  setInterval(requestSync, 60_000);
+  addEventListener("online", function () {
+    requestSync(true);
+  });
+  setInterval(function () {
+    if (document.visibilityState === "visible") requestSync();
+  }, 5 * SYNC_GAP_MS);
 })();
