@@ -146,3 +146,33 @@ html[data-offline="1"] .thread [data-action="delete-message"] {
   transition: opacity 160ms, transform 160ms;
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* The ⋯ menu: only under the 820px breakpoint (responsive.css), where it holds Edit, New, Copy and Theme. */
+.more-btn { display: none; }
+.more-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 8px;
+  z-index: 22;
+  min-width: 200px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-panel);
+}
+.more-menu[hidden] { display: none; }
+.more-menu button {
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 16px;
+  text-align: left;
+}
+.more-menu button[hidden] { display: none; }
+.more-menu button:hover,
+.more-menu button:focus-visible { background: var(--hover); }
+.sidebar-backdrop { display: none; }

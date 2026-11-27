@@ -58,6 +58,15 @@
         <svg class="icon i-light" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3"/><path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M3 3l1 1M12 12l1 1M3 13l1-1M12 4l1-1"/></svg>
         <svg class="icon i-dark" viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 9.5A5.5 5.5 0 0 1 6.5 2.5a5.5 5.5 0 1 0 7 7z"/></svg>
       </button>
+      <button class="icon-btn more-btn" id="more-btn" type="button" title="More" aria-label="More actions" aria-haspopup="menu" aria-expanded="false" aria-controls="more-menu">
+        <svg class="icon" aria-hidden="true"><use href="#i-dots"/></svg>
+      </button>
+    </div>
+    <div class="more-menu" id="more-menu" role="menu" aria-label="More actions" hidden>
+      <button type="button" role="menuitem" data-proxy="#edit-spec">Edit this spec</button>
+      <button type="button" role="menuitem" data-proxy="#new-spec">New spec</button>
+      <button type="button" role="menuitem" data-proxy="#copy-md">Copy Markdown</button>
+      <button type="button" role="menuitem" data-proxy="#theme" data-keep-open>Theme: <span id="more-theme">auto</span></button>
     </div>
   </header>
   <div id="offline" class="offline-banner" hidden role="status">
@@ -96,6 +105,7 @@
     </div>
   </div>
   <div class="layout">
+    <div class="sidebar-backdrop" id="sidebar-backdrop" aria-hidden="true"></div>
     <aside class="sidebar" id="sidebar">
       <div class="filter-wrap">
         <input id="filter" type="search" placeholder="Filter files" autocomplete="off" spellcheck="false" aria-label="Filter files">

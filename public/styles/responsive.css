@@ -21,7 +21,27 @@
   .no-sidebar .sidebar { display: block; }
   .sidebar-open .sidebar { transform: none; }
   .meta { display: none; }
-  /* cursor://file does nothing on a phone, and Edit needs the room. */
-  #open-editor { display: none; }
+  /* cursor://file does nothing on a phone. Edit, New, Copy and Theme are rarely needed there, so they live in the ⋯ menu. */
+  #open-editor,
+  .actions #edit-spec,
+  .actions #new-spec,
+  .actions #copy-md,
+  .actions #theme { display: none; }
+  .more-btn { display: inline-grid; }
+  /* Tap targets: 44px, the iOS minimum. */
+  .topbar .icon-btn { width: 44px; height: 44px; flex: none; }
+  .topbar .live { margin: 0 4px; }
+  button.crumbs { min-height: 44px; }
+  .sidebar-open .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: var(--topbar) 0 0 0;
+    z-index: 14;
+    background: rgb(0 0 0 / 0.25);
+  }
   .doc { padding: 28px 20px 100px; font-size: 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar { transition: none; }
 }
