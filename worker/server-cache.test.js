@@ -6,7 +6,7 @@ import worker from "./index.js";
 // with an ETag, and /api/ answers say where their time went.
 const HOST = "https://specs.neilsriv.tech";
 const KEY = "demo/cache.md";
-const OPEN = { ...env, AUTH_MODE: "open", HUMAN_EMAILS: "neil@neilsriv.tech" };
+const OPEN = { ...env, AUTH_MODE: "open", ALLOW_ANONYMOUS_HUMAN: "1", HUMAN_EMAILS: "neil@neilsriv.tech" };
 
 beforeEach(async () => {
   const listed = await env.BUCKET.list();

@@ -6,7 +6,7 @@ Run this from a checkout of mdview, with the Mac store still at `~/.mdview/peanu
 
 ## Open mode (no Access yet)
 
-Until Neil's IdP is ready, the Worker runs with `AUTH_MODE=open` (set in `worker/wrangler.jsonc`) and nothing sits in front of it. A request with no `Authorization` header is the first `HUMAN_EMAILS` entry. Bearer keys, set with `wrangler secret put`, pick the other roles:
+Until Neil's IdP is ready, the Worker runs with `AUTH_MODE=open` (set in `worker/wrangler.jsonc`) and nothing sits in front of it. A request with no `Authorization` header is 401, including the viewer in a browser. Bearer keys, set with `wrangler secret put`, pick the other roles. `ALLOW_ANONYMOUS_HUMAN=1` restores the old behavior (every unkeyed request is the first `HUMAN_EMAILS` entry, and anyone who can set `Origin` to the public host can write as them). Do not set it on `specs.neilsriv.tech`.
 
 | Worker secret | Client variable | Role |
 | --- | --- | --- |

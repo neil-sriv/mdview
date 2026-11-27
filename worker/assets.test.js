@@ -5,7 +5,7 @@ import worker from "./index.js";
 // The page links the hashed build from worker/prepare-assets.mjs. Those files are
 // immutable; the unhashed paths older pages and service workers ask for still work.
 const HOST = "https://specs.neilsriv.tech";
-const OPEN = { ...env, AUTH_MODE: "open", HUMAN_EMAILS: "neil@neilsriv.tech" };
+const OPEN = { ...env, AUTH_MODE: "open", ALLOW_ANONYMOUS_HUMAN: "1", HUMAN_EMAILS: "neil@neilsriv.tech" };
 
 describe("hashed assets", () => {
   it("serves a page that links only hashed scripts and stylesheets", async () => {

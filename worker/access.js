@@ -12,8 +12,10 @@
  * 401, redirect or not.
  *
  * AUTH_MODE=open (no Access in front, until Neil's IdP is ready): a request
- * with no Authorization header is the first HUMAN_EMAILS entry, except on
- * `/internal/`, which is 401. `Authorization: Bearer <key>` picks the role:
+ * with no Authorization header is 401. Set ALLOW_ANONYMOUS_HUMAN=1 to treat
+ * that request as the first HUMAN_EMAILS entry instead (never on a public
+ * host: anyone who can send the page's Origin can then write as that human).
+ * `/internal/` stays 401 either way. `Authorization: Bearer <key>` picks the role:
  * ADMIN_KEY is admin, BACKUP_KEY is backup, AGENT_KEY is an agent named by
  * X-Mdview-Agent (or X-Mdview-Author). Any other bearer is 401.
  */
@@ -54,6 +56,9 @@ async function identifyOpen(request, env) {
   const auth = request.headers.get("Authorization");
   if (!auth) {
     if (pathname.startsWith("/internal/")) return { response: reject(request, 401, "That API needs a key.") };
+    // Off unless a deploy opts in. specs.neilsriv.tech must not: curl with
+    // Origin set to the public host was enough to write as the human.
+    if (String(env.ALLOW_ANONYMOUS_HUMAN ?? "") !== "1") return { response: reject(request, 401, "Sign in.") };
     const author = split(env.HUMAN_EMAILS)[0];
     if (!author) return { response: reject(request, 403, "This identity can't do that.") };
     return { identity: { kind: "human", author, session: null } };
