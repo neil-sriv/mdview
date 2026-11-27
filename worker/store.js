@@ -83,14 +83,15 @@ async function specOnce(stub, requestId, fn) {
   if (prior?.hit) return prior.value;
   // Load-bearing. This Miniflare ignores R2 onlyIf, so without this lock two
   // saves with the same If-Match can both land. onlyIf is still sent.
-  await stub.acquireSpecLock();
+  // The generation lets a late release (after the lock was stolen) no-op.
+  const generation = await stub.acquireSpecLock();
   try {
     const again = await stub.readRequest(requestId);
     if (again?.hit) return again.value;
     const value = await fn(null);
     return await stub.rememberRequest(requestId, value);
   } finally {
-    await stub.releaseSpecLock();
+    await stub.releaseSpecLock(generation);
   }
 }
 
@@ -131,10 +132,19 @@ function jsonSafe(value) {
   return value;
 }
 
+const SPEC_LOCK_MS = 30_000;
+
+function positiveMs(value, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
 export class PeanutStore extends DurableObject {
   #db;
   #peanut;
   #specLock = false;
+  #specGeneration = 0;
+  #specDeadline = 0;
   #specWaiters = [];
 
   constructor(ctx, env) {
@@ -225,18 +235,42 @@ export class PeanutStore extends DurableObject {
     );
   }
 
-  async acquireSpecLock() {
-    if (!this.#specLock) {
-      this.#specLock = true;
-      return;
+  /**
+   * One spec write at a time. `timeoutMs` is how long this holder may keep it.
+   * The lock lives only in memory, and the R2 work happens in the worker, so a
+   * cancelled request used to leave it taken and every later save queued forever.
+   * After the deadline the next acquire takes it. A release for an older
+   * generation does nothing, so the abandoned holder cannot drop the new one.
+   */
+  async acquireSpecLock(timeoutMs = SPEC_LOCK_MS) {
+    const hold = positiveMs(timeoutMs, SPEC_LOCK_MS);
+    while (this.#specLock && Date.now() < this.#specDeadline) {
+      const remaining = this.#specDeadline - Date.now();
+      await new Promise((resolve) => {
+        let wake;
+        const finish = () => {
+          clearTimeout(timer);
+          const index = this.#specWaiters.indexOf(wake);
+          if (index !== -1) this.#specWaiters.splice(index, 1);
+          resolve();
+        };
+        const timer = setTimeout(finish, remaining);
+        wake = finish;
+        this.#specWaiters.push(wake);
+      });
     }
-    await new Promise((resolve) => this.#specWaiters.push(resolve));
+    this.#specLock = true;
+    this.#specDeadline = Date.now() + hold;
+    return ++this.#specGeneration;
   }
 
-  async releaseSpecLock() {
-    const next = this.#specWaiters.shift();
-    if (next) next();
-    else this.#specLock = false;
+  async releaseSpecLock(generation) {
+    if (generation !== this.#specGeneration) return;
+    this.#specLock = false;
+    this.#specDeadline = 0;
+    const waiters = this.#specWaiters;
+    this.#specWaiters = [];
+    for (const wake of waiters) wake();
   }
 
   async readRequest(id) {
