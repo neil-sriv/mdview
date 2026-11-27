@@ -100,11 +100,32 @@ function fetchRace(request, ms) {
   });
 }
 
-/** Aborts at `ms`, so the sync crawl cannot sit on a dead Tailscale connect. */
-function fetchWithin(resource, ms = NETWORK_MS) {
+/**
+ * Aborts at `ms`, so the sync crawl cannot sit on a dead Tailscale connect.
+ * Bypasses the HTTP cache unless `cache` says otherwise.
+ */
+function fetchWithin(resource, ms = NETWORK_MS, cache = "no-store") {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
-  return fetch(resource, { signal: controller.signal, cache: "no-store" }).finally(() => clearTimeout(timer));
+  return fetch(resource, { signal: controller.signal, cache }).finally(() => clearTimeout(timer));
+}
+
+/**
+ * A file the Worker's build named by its content hash (worker/prepare-assets.mjs).
+ * Its bytes never change, so a saved copy is reused and the HTTP cache may answer.
+ */
+function isHashed(pathname) {
+  return pathname.startsWith("/static/build/");
+}
+
+// Big enough for the app bundle. A vendored minified library (mermaid) is bigger and links nothing the shell needs.
+const SCAN_BYTES = 1024 * 1024;
+
+function worthScanning(url, res) {
+  if (url.endsWith(".min.js")) return false;
+  const length = Number(res.headers.get("content-length"));
+  if (Number.isFinite(length) && length > SCAN_BYTES) return false;
+  return /text|json|javascript|svg|xml/.test(res.headers.get("content-type") ?? "");
 }
 
 // The single timed-out page fetch still allowed to finish and refresh the cache.
@@ -338,21 +359,31 @@ function linksIn(text, url) {
  * cache always holds one deploy's files. Writing each file as it came in left a
  * crawl that stopped partway (a dead connect, or a deploy landing mid-crawl, or the
  * page reading the cache during the crawl) with new and old modules side by side.
+ * Then it drops every saved shell file the crawl did not reach: an older deploy's
+ * hashed files, which would otherwise pile up.
  */
 async function cacheShell() {
-  const fetched = await crawlShell();
-  if (!fetched) return false;
   const cache = await caches.open(SHELL);
-  for (const { url, res } of fetched) {
+  const fetched = await crawlShell(cache);
+  if (!fetched) return false;
+  const reached = new Set();
+  for (const { url, res, saved } of fetched) {
+    reached.add(new URL(url, self.location.origin).href);
+    if (saved) continue;
     // The page itself is stamped so an offline load can say when it was saved.
     if (url === "/view/") await putStamped(cache, url, res);
     else await putAsIs(cache, url, res);
   }
+  for (const request of await cache.keys()) if (!reached.has(request.url)) await cache.delete(request);
   return true;
 }
 
-/** Every shell file reachable from /view/, or null when the network dropped partway. */
-async function crawlShell() {
+/**
+ * Every shell file reachable from /view/, or null when the network dropped partway.
+ * A hashed file already saved is read from the cache, not fetched again; one not
+ * saved yet may come from the HTTP cache, which the page's own load filled.
+ */
+async function crawlShell(cache) {
   const queue = ["/view/", "/manifest.webmanifest"];
   const seen = new Set();
   const fetched = [];
@@ -360,17 +391,18 @@ async function crawlShell() {
     const url = queue.shift();
     if (seen.has(url)) continue;
     seen.add(url);
-    let res;
+    const hashed = isHashed(url);
+    let res = hashed ? await cache.match(url) : undefined;
+    const saved = Boolean(res);
     let text = "";
     try {
-      res = await fetchWithin(url);
+      if (!res) res = await fetchWithin(url, NETWORK_MS, hashed ? "default" : "no-store");
       if (!res.ok) continue;
-      const type = res.headers.get("content-type") ?? "";
-      if (/text|json|javascript|svg|xml/.test(type)) text = await res.clone().text();
+      if (worthScanning(url, res)) text = await res.clone().text();
     } catch {
       return null;
     }
-    fetched.push({ url, res });
+    fetched.push({ url, res, saved });
     if (text) for (const next of linksIn(text, url)) if (!seen.has(next)) queue.push(next);
   }
   return fetched;
