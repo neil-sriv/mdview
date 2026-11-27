@@ -6,3 +6,7 @@ node_modules/
 public/style.css
 public/vendor-hljs/
 public/vendor/
+public/static/build/
+public/shell.html
+public/_headers
+.wrangler/
