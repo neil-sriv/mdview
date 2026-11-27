@@ -4,7 +4,7 @@ export const $ = (selector) => document.querySelector(selector);
 export const root = document.documentElement;
 
 export async function getJson(url) {
-  const res = await fetch(url, { cache: "no-store" });
+  const res = await fetch(url, { cache: "no-cache" });
   // A cached doc carries the time it was saved. A live response does not, which clears the offline banner.
   const cachedAt = res.headers.get("X-Mdview-Cached-At");
   if (url.startsWith("/api/doc")) {

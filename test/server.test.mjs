@@ -382,6 +382,23 @@ test("a comment made after /api/doc read the threads, before the stream opened, 
   assert.match(stream, /event: comments/);
 });
 
+test("JSON reads carry an ETag and answer an unchanged If-None-Match with 304", async () => {
+  const first = await get("/api/doc?path=notes/plan.md&comments=1");
+  assert.equal(first.status, 200);
+  assert.match(first.headers.etag, /^W\/"[0-9a-f]{32}"$/);
+  assert.equal(first.headers["cache-control"], "private, no-cache");
+  const again = await new Promise((resolve, reject) => {
+    const req = http.get({ host: "127.0.0.1", port, path: "/api/doc?path=notes/plan.md&comments=1", headers: { Host: `127.0.0.1:${port}`, "If-None-Match": first.headers.etag } }, (res) => {
+      let body = "";
+      res.on("data", (chunk) => (body += chunk));
+      res.on("end", () => resolve({ status: res.statusCode, body }));
+    });
+    req.on("error", reject);
+  });
+  assert.equal(again.status, 304);
+  assert.equal(again.body, "");
+});
+
 test("the manifest, icons and service worker are served for an installed app", async () => {
   const manifest = await get("/manifest.webmanifest");
   const page = await get("/view/notes/plan.md");

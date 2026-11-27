@@ -9,7 +9,9 @@ import { identify } from "./access.js";
 import { AssetSource, IMMUTABLE } from "./assets.js";
 import { deliverOutbox } from "./deliver.js";
 import { R2DocSource } from "./docs.js";
+import { renderCache } from "./render-cache.js";
 import { pruneRequests, remoteStore } from "./store.js";
+import { Timing } from "./timing.js";
 
 export { PeanutStore } from "./store.js";
 
@@ -31,11 +33,15 @@ export default {
         return new Response(request.method === "HEAD" ? null : built.body, { status: 200, headers });
       }
     }
-    const docs = new R2DocSource(env.BUCKET);
-    const response = await handle(request, {
+    const started = Date.now();
+    const timing = url.pathname.startsWith("/api/") ? new Timing() : null;
+    const docs = new R2DocSource(timing ? timing.wrap(env.BUCKET, "r2") : env.BUCKET);
+    const store = timing ? timing.wrap(remoteStore(env), "store") : remoteStore(env);
+    let response = await handle(request, {
       docs,
       assets,
-      store: remoteStore(env),
+      store,
+      renders: renderCache(env, ctx, timing),
       identity: auth.identity,
       initial: url.pathname === "/" || url.pathname === "/api/info" ? await docs.initial() : "",
       allowedHosts: null,
@@ -43,6 +49,10 @@ export default {
       watchMs: WATCH_MS,
     });
     if (request.method === "POST" && auth.identity.kind === "human" && response.ok) ctx.waitUntil(deliverOutbox(env));
+    if (timing && !(response.headers.get("content-type") ?? "").startsWith("text/event-stream")) {
+      response = new Response(response.body, response);
+      response.headers.set("Server-Timing", timing.header(Date.now() - started));
+    }
     return response;
   },
 
