@@ -23,7 +23,7 @@
   }
 
   function isAppScript(target) {
-    return target && target.tagName === "SCRIPT" && /\/static\/js\//.test(target.src || "");
+    return target && target.tagName === "SCRIPT" && /\/static\/(?:build\/)?js\//.test(target.src || "");
   }
 
   function wait(ms) {

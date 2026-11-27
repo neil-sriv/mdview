@@ -22,7 +22,12 @@
   "assets": {
     "directory": "../public",
     "binding": "ASSETS",
-    "run_worker_first": true
+    // Everything but /static/build/* runs the Worker first (Access, CSP, the
+    // page). /static/build/ is the hashed build from prepare-assets.mjs, served
+    // straight from the asset store with public/_headers' immutable
+    // Cache-Control. A path a negative pattern matches never reaches the
+    // Worker, so it must cover only files that exist in public/.
+    "run_worker_first": ["/*", "!/static/build/*"]
   },
   "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "mdview-specs" }],
   "durable_objects": {

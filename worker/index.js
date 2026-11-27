@@ -6,7 +6,7 @@
  */
 import { handle } from "../lib/app.mjs";
 import { identify } from "./access.js";
-import { AssetSource } from "./assets.js";
+import { AssetSource, IMMUTABLE } from "./assets.js";
 import { deliverOutbox } from "./deliver.js";
 import { R2DocSource } from "./docs.js";
 import { pruneRequests, remoteStore } from "./store.js";
@@ -20,10 +20,21 @@ export default {
     const auth = await identify(request, env);
     if (auth.response) return auth.response;
     const url = new URL(request.url);
+    const assets = new AssetSource(env.ASSETS);
+    // The hashed build normally never reaches the Worker (run_worker_first skips
+    // /static/build/*). When it does, answer it the way the asset store would.
+    if (url.pathname.startsWith("/static/build/") && (request.method === "GET" || request.method === "HEAD")) {
+      const built = await assets.built(url.pathname);
+      if (built) {
+        const headers = new Headers(built.headers);
+        headers.set("Cache-Control", IMMUTABLE);
+        return new Response(request.method === "HEAD" ? null : built.body, { status: 200, headers });
+      }
+    }
     const docs = new R2DocSource(env.BUCKET);
     const response = await handle(request, {
       docs,
-      assets: new AssetSource(env.ASSETS),
+      assets,
       store: remoteStore(env),
       identity: auth.identity,
       initial: url.pathname === "/" || url.pathname === "/api/info" ? await docs.initial() : "",
