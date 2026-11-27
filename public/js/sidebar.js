@@ -21,6 +21,11 @@ export function toggleSidebar() {
   sidebarHooks.resized();
 }
 
+/** Closes the overlay file list on a narrow screen. */
+export function closeSidebar() {
+  root.classList.remove("sidebar-open");
+}
+
 export function showSidebar() {
   if (NARROW.matches) root.classList.add("sidebar-open");
   else if (root.classList.contains("no-sidebar")) toggleSidebar();

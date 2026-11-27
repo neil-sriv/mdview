@@ -15,6 +15,7 @@ import { docHooks, loadDoc, renderMeta, showError, watchToggles } from "./doc.js
 import { showInbox } from "./inbox.js";
 import { encodePath, relFromPathname, threadFromSearch, versionFromSearch } from "./lib/paths.js";
 import { closeLightbox, watchImages } from "./lightbox.js";
+import { initMobile } from "./mobile.js";
 import { watchDiagramTheme } from "./mermaid.js";
 import { navHooks, watchNavigation } from "./nav.js";
 import { scheduleScrollUpdate, updateScroll } from "./scroll.js";
@@ -67,6 +68,7 @@ async function init() {
   watchNavigation();
   watchImages();
   watchShortcuts();
+  initMobile();
   setInterval(renderMeta, 30_000);
 
   try {

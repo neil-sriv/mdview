@@ -76,15 +76,17 @@ function saves(page) {
 
 test("Edit saves a spec from a phone and keeps the draft until that succeeds", { skip: chromeMissing }, async (t) => {
   const { viewer, page } = await setup(t, { width: 390, height: 844 });
+  // On a phone, Edit lives in the ⋯ menu.
+  await click(page, "#more-btn");
   const box = await page.eval(() => {
-    const el = document.querySelector("#edit-spec");
+    const el = document.querySelector('#more-menu [data-proxy="#edit-spec"]');
     const rect = el.getBoundingClientRect();
     return { height: rect.height, top: rect.top, right: rect.right, width: window.innerWidth };
   });
   assert.ok(box.height >= 44, `Edit is ${box.height}px tall`);
   assert.ok(box.right <= box.width + 1, "Edit sits on screen");
 
-  await click(page, "#edit-spec");
+  await click(page, '#more-menu [data-proxy="#edit-spec"]');
   await page.waitFor(() => !document.querySelector("#spec-editor").hidden, { what: "the editor" });
   const metrics = await page.eval(() => {
     const save = document.querySelector("#spec-save").getBoundingClientRect();

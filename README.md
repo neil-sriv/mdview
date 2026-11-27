@@ -38,6 +38,8 @@ Open mdview over HTTPS (a tailnet address works) and add it to the home screen. 
 
 While the app can reach the computer it saves the viewer and every Markdown file under the root, and refetches a file only when its contents change. Images those files reference are saved too, up to 2 MiB each (2,097,152 bytes); larger images stay online-only. Saved notes and the file list still open when the computer is unreachable, when a connection never answers, or when the proxy returns a gateway error. A silent connect is given up after three seconds. A banner shows when that copy was saved (`Offline — saved at 10:42`). Comment posting is off until the computer is back, and nothing is queued. Live reload waits quietly and reconnects on its own.
 
+Under 820px wide, the topbar keeps the file-list button, the path, comments and a ⋯ menu; Edit, New, Copy Markdown and Theme live in that menu. Swipe right from the left edge (within 24px, 60px across) to open the file list, and swipe left on it or tap beside it to close it. In Safari and Chrome on iOS that edge swipe is the browser's Back whenever there is a page to go back to, so it opens the list reliably only in the home-screen app; the file-list button always works.
+
 Paths are relative to the page, so this works through a proxy that rewrites the host. After installing this version, remove the old home-screen icon and add it again so the phone picks up the manifest.
 
 | Key | Does |
