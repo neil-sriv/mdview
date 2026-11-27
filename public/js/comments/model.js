@@ -11,12 +11,18 @@ import { renderCommentChrome } from "./topbar.js";
 export async function loadComments() {
   const comments = state.comments;
   const doc = state.doc;
+  const prefetched = comments.prefetched;
+  comments.prefetched = null;
   if (!comments.enabled || !doc) return;
   let data;
-  try {
-    data = await getJson(`/api/comments?path=${encodeURIComponent(doc.path)}&sha=${doc.sha}`);
-  } catch {
-    return; // The server may be restarting. The next live-reload event retries.
+  if (prefetched?.doc === doc) {
+    data = prefetched.data;
+  } else {
+    try {
+      data = await getJson(`/api/comments?path=${encodeURIComponent(doc.path)}&sha=${doc.sha}`);
+    } catch {
+      return; // The server may be restarting. The next live-reload event retries.
+    }
   }
   if (state.doc !== doc) return;
   // A write to the store on any doc reloads every tab's comments; when nothing here changed, redrawing would only disturb a reply being typed.

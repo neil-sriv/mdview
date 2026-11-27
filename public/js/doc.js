@@ -173,7 +173,13 @@ function versionBanner(doc) {
   return `<div class="version-banner">You are reading v${doc.version.seq} of ${doc.version.latestSeq}, as it stood ${ago(doc.mtimeMs)}. Comments made after it are hidden. <a href="/view/${encodePath(doc.path)}">Back to the latest</a></div>`;
 }
 
-export async function loadDoc(rel, { keepScroll = false, hash = location.hash, version = state.viewVersion } = {}) {
+/** The rendered doc at `path`, with its threads, so comments need no second request. */
+export function fetchDoc(path, version) {
+  return getJson(`/api/doc?path=${encodeURIComponent(path)}${version ? `&v=${version}` : ""}&comments=1`);
+}
+
+/** `prefetched` is a fetchDoc() for the same path and version, started before the tree and info arrived. */
+export async function loadDoc(rel, { keepScroll = false, hash = location.hash, version = state.viewVersion, prefetched = null } = {}) {
   let doc;
   $("#versions-menu").hidden = true;
   const path = docRequestPath(rel, state.info?.initial);
@@ -182,7 +188,7 @@ export async function loadDoc(rel, { keepScroll = false, hash = location.hash, v
     return;
   }
   try {
-    doc = await getJson(`/api/doc?path=${encodeURIComponent(path)}${version ? `&v=${version}` : ""}`);
+    doc = await (prefetched ?? fetchDoc(path, version));
   } catch (err) {
     showError(rel, err);
     return;
@@ -194,6 +200,9 @@ export async function loadDoc(rel, { keepScroll = false, hash = location.hash, v
 
   const scrollY = window.scrollY;
   const sameDoc = state.doc?.path === doc.path;
+  // The threads came with the doc; loadComments() takes them instead of asking again.
+  state.comments.prefetched = doc.comments ? { doc, data: doc.comments } : null;
+  delete doc.comments;
   state.doc = doc;
   state.viewVersion = doc.old ? doc.version.seq : null;
   if (!sameDoc) {
@@ -221,7 +230,7 @@ export async function loadDoc(rel, { keepScroll = false, hash = location.hash, v
   expandAncestors(doc.path);
   renderTree();
   revealActiveFile();
-  watch(doc.path);
+  watch(doc.path, doc.changeToken);
 
   if (keepScroll) window.scrollTo(0, scrollY);
   else if (hash) scrollToHash(hash, "auto");
@@ -256,12 +265,13 @@ export function releaseReload() {
   if (reloadWaiting) reloadDoc();
 }
 
-function watch(rel) {
+/** `since` is the store token the doc's threads were read at, so a comment made before the stream opens still rings. */
+function watch(rel, since) {
   if (state.events?.rel === rel) return;
   state.events?.source.close();
   const live = $("#live");
   live.classList.remove("on");
-  const source = new EventSource(`/api/events?path=${encodeURIComponent(rel)}`);
+  const source = new EventSource(`/api/events?path=${encodeURIComponent(rel)}${since ? `&since=${encodeURIComponent(since)}` : ""}`);
   source.onopen = () => {
     live.classList.add("on");
     if (!reloadWaiting) live.title = LIVE_ON;

@@ -205,6 +205,8 @@ async function serveCached(event, url, kind, cache) {
   // A /view/<doc> URL opened cold has no entry of its own; the shell at /view/ does,
   // and the page then reads the doc from the cached /api/doc response.
   let cached = await cache.match(event.request.url);
+  const alias = cached ? null : docAlias(url);
+  if (alias) cached = await cache.match(alias);
   if (!cached && kind.nav) cached = await cache.match("/view/");
   if (cached && signals(url, kind.nav)) {
     await tell(event.clientId, {
@@ -392,10 +394,22 @@ async function readJson(cache, url) {
   }
 }
 
-/** The cache and fetch URL for a rendered doc, or null when there is no path. */
+/** The cache and fetch URL for a rendered doc and its threads, as the page asks for it, or null when there is no path. */
 function docUrl(path) {
   if (!path) return null;
-  return `/api/doc?path=${encodeURIComponent(path)}`;
+  return `/api/doc?path=${encodeURIComponent(path)}&comments=1`;
+}
+
+/**
+ * The same doc saved under its other URL: a page asks for `comments=1`, and a
+ * cache from before that saved the doc without it.
+ */
+function docAlias(url) {
+  if (url.pathname !== "/api/doc") return null;
+  const other = new URL(url);
+  if (other.searchParams.has("comments")) other.searchParams.delete("comments");
+  else other.searchParams.set("comments", "1");
+  return other.href;
 }
 
 async function cacheDocs() {

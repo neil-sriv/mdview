@@ -25,5 +25,12 @@ test("the offline cache does not request a doc with an empty path", () => {
   const { docUrl } = loadSw();
   assert.equal(docUrl(""), null);
   assert.equal(docUrl(undefined), null);
-  assert.equal(docUrl("notes/plan.md"), "/api/doc?path=notes%2Fplan.md");
+  assert.equal(docUrl("notes/plan.md"), "/api/doc?path=notes%2Fplan.md&comments=1");
+});
+
+test("a doc saved with or without its threads answers the other URL offline", () => {
+  const { docAlias } = loadSw();
+  assert.equal(docAlias(new URL("https://specs.example/api/doc?path=a.md&comments=1")), "https://specs.example/api/doc?path=a.md");
+  assert.equal(docAlias(new URL("https://specs.example/api/doc?path=a.md&v=2")), "https://specs.example/api/doc?path=a.md&v=2&comments=1");
+  assert.equal(docAlias(new URL("https://specs.example/api/tree")), null);
 });
