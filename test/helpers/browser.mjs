@@ -133,6 +133,13 @@ async function connect(wsUrl, closeTarget) {
 
   const page = {
     send,
+    /** Calls `listener` with each CDP `method` event's params. Returns the unsubscribe. */
+    on(method, listener) {
+      const set = listeners.get(method) ?? new Set();
+      set.add(listener);
+      listeners.set(method, set);
+      return () => set.delete(listener);
+    },
     /** Uncaught exceptions the page has thrown so far. */
     errors,
     /**
