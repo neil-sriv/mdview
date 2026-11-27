@@ -80,10 +80,10 @@ export class R2DocSource {
     return text;
   }
 
-  async mtimeMs(file) {
+  async mtimeMs(file, options = {}) {
     const path = clean(file);
     if (path == null || !path) return null;
-    const meta = await this.#head(path);
+    const meta = await this.#head(path, options.fresh);
     return meta ? meta.mtimeMs : null;
   }
 
@@ -139,7 +139,10 @@ export class R2DocSource {
     const hash = sha256(content);
     const updatedAt = obj.customMetadata?.updatedAt || obj.uploaded.toISOString();
     this.#text.set(key, content);
-    this.#meta.set(key, { mtimeMs: Date.parse(updatedAt) });
+    // Same clock as #head. A get that finished first used to memo Date.parse(updatedAt)
+    // and ignore a preserved mtimeMs, so the page's "edited" time depended on which
+    // R2 call won.
+    this.#meta.set(key, { mtimeMs: mtimeOf(obj) });
     return {
       content,
       sha256: hash,
@@ -293,8 +296,11 @@ export class R2DocSource {
     return { kind: "markdown", rel: path, abs: path, file: path, key: path };
   }
 
-  async #head(path) {
-    if (this.#meta.has(path)) return this.#meta.get(path);
+  async #head(path, fresh = false) {
+    // The memo dedupes resolve + readText inside one page read. Pass fresh for
+    // the /api/events poll: that stream keeps this object open, and a memo
+    // there would freeze the mtime so a save never reloads the page.
+    if (!fresh && this.#meta.has(path)) return this.#meta.get(path);
     const obj = await this.bucket.head(specObject(path));
     if (!obj) {
       this.#meta.set(path, null);
