@@ -7,6 +7,12 @@
  * refetches only the files that changed, plus their rendered /api/doc page and
  * same-origin images at or under the catalog's byte cap.
  *
+ * Online, every shell file goes to the network like the page does, so one page
+ * load runs one deploy's modules. Serving saved shell files first and refreshing
+ * them behind the page let a load link a new doc.js against an old lib/paths.js
+ * after a deploy; the missing export stopped every module and left a blank page.
+ * Saved shell files are handed over at once only while the network is down.
+ *
  * Online, a request goes to the network and refreshes the cache. A connect that
  * never answers (the phone can still resolve the Mac over Tailscale) is given
  * up after NETWORK_MS, and a 5xx from the proxy is treated the same way: the
@@ -28,6 +34,10 @@ const NETWORK_MS = 3000;
 const READ_APIS = new Set(["/api/doc", "/api/docs", "/api/tree", "/api/info", "/api/inbox"]);
 
 let syncing = null;
+// Set when the last attempt hung, dropped, or got a 5xx; cleared by any real answer.
+// While it is set, shell files come straight from the cache instead of each
+// waiting out NETWORK_MS.
+let networkDown = false;
 let imageCap = FALLBACK_IMAGE_BYTES;
 
 self.addEventListener("install", (event) => {
@@ -122,8 +132,7 @@ async function refreshCached(request, cache, kind) {
   try {
     const fresh = await fetchWithin(request);
     if (!fresh.ok || isGateway(fresh.status)) return;
-    if (kind.raw) await cacheImage(cache, request, fresh);
-    else await putStamped(cache, request, fresh);
+    await save(cache, request, fresh, kind);
   } catch {
     // The saved copy stays. The attempt aborts at NETWORK_MS, so it does not sit on the socket.
   }
@@ -131,22 +140,26 @@ async function refreshCached(request, cache, kind) {
 
 async function networkFirst(event, url, kind) {
   const cache = await caches.open(kind.shell ? SHELL : DOCS);
-  // Shell files and images are already on the phone after the first save. Hand them over
-  // at once and revalidate behind the page; a navigation or a read API waits up to NETWORK_MS
-  // so an awake Mac still wins, then falls back.
-  if (!kind.nav && !kind.api) {
+  // An image is the same bytes whichever deploy asks for it: hand the saved copy over at
+  // once and revalidate behind the page. A shell file is only taken from the cache while
+  // the network is down, so an online page never mixes two deploys' modules. Everything
+  // else waits up to NETWORK_MS so an awake Mac still wins, then falls back.
+  if (kind.raw || (kind.shell && !kind.nav && networkDown)) {
     const cached = await cache.match(event.request.url);
     if (cached) {
-      const pending = refreshCached(event.request, cache, kind);
-      try {
-        event.waitUntil(pending);
-      } catch {
-        // The page already has the saved copy.
+      if (kind.raw) {
+        const pending = refreshCached(event.request, cache, kind);
+        try {
+          event.waitUntil(pending);
+        } catch {
+          // The page already has the saved copy.
+        }
       }
       return cached;
     }
   }
   const outcome = await fetchRace(event.request, NETWORK_MS);
+  networkDown = !outcome.response || isGateway(outcome.response.status);
 
   if (outcome.response?.ok) {
     cancelLate();
@@ -157,8 +170,7 @@ async function networkFirst(event, url, kind) {
     // once the fetch handler has returned, and that must not turn into an offline miss.
     try {
       event.waitUntil((async () => {
-        if (kind.raw) await cacheImage(cache, event.request, saved);
-        else await putStamped(cache, event.request, saved);
+        await save(cache, event.request, saved, kind);
         if (shell) await putStamped(cache, "/view/", shell);
       })());
     } catch {
@@ -175,12 +187,8 @@ async function networkFirst(event, url, kind) {
   if (outcome.timeout) {
     const pending = adoptLate(outcome.controller, outcome.network, async (late) => {
       if (!late.ok || isGateway(late.status)) return;
-      if (kind.raw) {
-        await cacheImage(cache, event.request, late);
-        return;
-      }
       const shell = kind.nav ? late.clone() : null;
-      await putStamped(cache, event.request, late);
+      await save(cache, event.request, late, kind);
       if (shell) await putStamped(cache, "/view/", shell);
     });
     try {
@@ -210,6 +218,28 @@ async function serveCached(event, url, kind, cache) {
     status: 503,
     headers: { "Content-Type": "text/plain; charset=utf-8" },
   });
+}
+
+/**
+ * Writes a response the fetch handler got. A shell file other than the page is
+ * stored as the network gave it: Firefox checks a script against the page's
+ * script-src path (/static/js/) by the response's URL, and a Response rebuilt
+ * here has none, so it blocked every saved script and the page came up blank.
+ */
+function save(cache, request, response, kind) {
+  if (kind.raw) return cacheImage(cache, request, response);
+  if (kind.shell && !kind.nav) return putAsIs(cache, request, response);
+  return putStamped(cache, request, response);
+}
+
+/** Stores the network's own response, which keeps its URL. False means the cache rejected it. */
+async function putAsIs(cache, request, response) {
+  try {
+    await cache.put(asRequest(request), response);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Caches an image response when it is an image within the cap. False means the cache rejected it. */
@@ -301,28 +331,47 @@ function linksIn(text, url) {
   return [...found];
 }
 
+/**
+ * Crawls the whole shell first and writes it only once every file arrived, so the
+ * cache always holds one deploy's files. Writing each file as it came in left a
+ * crawl that stopped partway (a dead connect, or a deploy landing mid-crawl, or the
+ * page reading the cache during the crawl) with new and old modules side by side.
+ */
 async function cacheShell() {
+  const fetched = await crawlShell();
+  if (!fetched) return false;
   const cache = await caches.open(SHELL);
+  for (const { url, res } of fetched) {
+    // The page itself is stamped so an offline load can say when it was saved.
+    if (url === "/view/") await putStamped(cache, url, res);
+    else await putAsIs(cache, url, res);
+  }
+  return true;
+}
+
+/** Every shell file reachable from /view/, or null when the network dropped partway. */
+async function crawlShell() {
   const queue = ["/view/", "/manifest.webmanifest"];
   const seen = new Set();
+  const fetched = [];
   while (queue.length && seen.size < SHELL_LIMIT) {
     const url = queue.shift();
     if (seen.has(url)) continue;
     seen.add(url);
     let res;
+    let text = "";
     try {
       res = await fetchWithin(url);
+      if (!res.ok) continue;
+      const type = res.headers.get("content-type") ?? "";
+      if (/text|json|javascript|svg|xml/.test(type)) text = await res.clone().text();
     } catch {
-      return false;
+      return null;
     }
-    if (!res.ok) continue;
-    const type = res.headers.get("content-type") ?? "";
-    const textual = /text|json|javascript|svg|xml/.test(type);
-    const text = textual ? await res.clone().text() : "";
-    await putStamped(cache, url, res);
+    fetched.push({ url, res });
     if (text) for (const next of linksIn(text, url)) if (!seen.has(next)) queue.push(next);
   }
-  return true;
+  return fetched;
 }
 
 async function mapPool(items, fn) {
