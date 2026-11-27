@@ -5,7 +5,7 @@ import worker from "./index.js";
 // The service worker's offline sync reads /api/docs. On the Worker it lists R2,
 // not a disk, and each entry's etag is the spec's sha256.
 const HOST = "https://specs.neilsriv.tech";
-const OPEN = { ...env, AUTH_MODE: "open", HUMAN_EMAILS: "neil@neilsriv.tech" };
+const OPEN = { ...env, AUTH_MODE: "open", ALLOW_ANONYMOUS_HUMAN: "1", HUMAN_EMAILS: "neil@neilsriv.tech" };
 
 beforeEach(async () => {
   const listed = await env.BUCKET.list();

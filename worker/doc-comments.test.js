@@ -6,7 +6,7 @@ import worker from "./index.js";
 const HOST = "https://specs.neilsriv.tech";
 const KEY = "demo/threads.md";
 const DOC = "# Threads\n\nKeep this paragraph.\n";
-const OPEN = { ...env, AUTH_MODE: "open", HUMAN_EMAILS: "neil@neilsriv.tech" };
+const OPEN = { ...env, AUTH_MODE: "open", ALLOW_ANONYMOUS_HUMAN: "1", HUMAN_EMAILS: "neil@neilsriv.tech" };
 
 beforeEach(async () => {
   const listed = await env.BUCKET.list();

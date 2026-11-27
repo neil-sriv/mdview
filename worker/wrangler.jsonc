@@ -39,9 +39,11 @@
   "triggers": { "crons": ["* * * * *", "17 3 * * *"] },
   "vars": {
     "PUBLIC_HOST": "specs.neilsriv.tech",
-    // "open" until Neil's IdP is ready: no Access, every unkeyed request is
-    // HUMAN_EMAILS[0], and keys pick agent, backup and admin. "access" (the
-    // default when unset) checks the Access JWT. Tests run with "access".
+    // "open" until Neil's IdP is ready: no Access JWT, and bearer keys pick
+    // agent, backup and admin. An unkeyed request is 401. Do not set
+    // ALLOW_ANONYMOUS_HUMAN here: that makes every visitor HUMAN_EMAILS[0],
+    // and a forged Origin can then write as them. "access" (the default when
+    // AUTH_MODE is unset) checks the Access JWT. Tests run with "access".
     "AUTH_MODE": "open",
     // Placeholder until the Access team name is confirmed.
     "TEAM_DOMAIN": "https://neilsriv.cloudflareaccess.com",

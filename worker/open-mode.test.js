@@ -2,8 +2,9 @@ import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:
 import { beforeEach, describe, expect, it } from "vitest";
 import worker from "./index.js";
 
-// AUTH_MODE=open: no Access in front. Unkeyed requests are Neil, bearer keys
-// pick agent, backup and admin, and /internal/ always needs the admin key.
+// AUTH_MODE=open: no Access in front. Unkeyed requests are 401 unless the
+// deploy sets ALLOW_ANONYMOUS_HUMAN=1. Bearer keys pick agent, backup and
+// admin, and /internal/ always needs the admin key.
 const HOST = "https://specs.neilsriv.tech";
 const KEY = "demo/note.md";
 const DOC = "Keep this paragraph.\n";
@@ -25,12 +26,24 @@ beforeEach(async () => {
 });
 
 describe("open mode", () => {
-  it("serves the UI and reads to an unkeyed caller as the first human email, with no Access redirect", async () => {
-    const root = await call("GET", "/", { headers: { accept: "text/html" } });
-    const page = await call("GET", `/view/${KEY}`, { headers: { accept: "text/html" } });
-    const head = await call("HEAD", `/view/${KEY}`);
+  it("refuses an unkeyed caller instead of treating them as the human", async () => {
     const info = await call("GET", "/api/info");
-    const list = await call("GET", "/api/specs");
+    const page = await call("GET", `/view/${KEY}`, { headers: { accept: "text/html" } });
+    const write = await call("POST", "/api/comments", { body: {} });
+
+    expect(info.status).toBe(401);
+    expect(page.status).toBe(401);
+    expect(page.location).toBeNull();
+    expect(write.status).toBe(401);
+  });
+
+  it("serves the UI as the first human email only when anonymous humans are explicitly allowed", async () => {
+    const allowed = { ...OPEN, ALLOW_ANONYMOUS_HUMAN: "1" };
+    const root = await call("GET", "/", { headers: { accept: "text/html" }, env: allowed });
+    const page = await call("GET", `/view/${KEY}`, { headers: { accept: "text/html" }, env: allowed });
+    const head = await call("HEAD", `/view/${KEY}`, { env: allowed });
+    const info = await call("GET", "/api/info", { env: allowed });
+    const list = await call("GET", "/api/specs", { env: allowed });
 
     expect(root.status).toBe(302);
     expect(root.location).toMatch(/^\/view\//);
@@ -63,10 +76,15 @@ describe("open mode", () => {
     const named = await call("GET", `/api/agent/threads?scope=${KEY}`, { key: "agent-key", agent: "specs" });
     const unnamed = await call("GET", `/api/agent/threads?scope=${KEY}`, { key: "agent-key" });
     const human = await call("GET", `/api/agent/threads?scope=${KEY}`, { agent: "specs" });
+    const anonymousHuman = await call("GET", `/api/agent/threads?scope=${KEY}`, {
+      agent: "specs",
+      env: { ...OPEN, ALLOW_ANONYMOUS_HUMAN: "1" },
+    });
 
     expect(named.status).toBe(200);
     expect(unnamed.status).toBe(400);
-    expect(human.status).toBe(403);
+    expect(human.status).toBe(401);
+    expect(anonymousHuman.status).toBe(403);
   });
 
   it("leaves access mode as the default", async () => {
